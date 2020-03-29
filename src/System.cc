@@ -258,8 +258,10 @@ cv::Mat System::TrackMonocular(const cv::Mat &im, const double &timestamp)
         }
     }
 
-    return mpTracker->GrabImageMonocular(im,timestamp);
+    return mpTracker->GrabImageMonocular(im,timestamp);//单目抓取图像
 }
+
+
 
 void System::ActivateLocalizationMode()
 {

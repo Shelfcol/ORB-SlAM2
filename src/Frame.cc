@@ -62,7 +62,8 @@ Frame::Frame(const Frame &frame)
 }
 
 
-// 双目的初始化
+// 双目的初始化 输入的图像必须进行极线校正
+//极线校正：现在大多数匹配算法假设立体图像对的两幅图像对应特征点在同一扫描线上，这样匹配特征点的搜索就从二维降到一维，则可以为左目的每个特征点建立带状区域搜索表，限定搜索区域
 Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeStamp, ORBextractor* extractorLeft, ORBextractor* extractorRight, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth)
     :mpORBvocabulary(voc),mpORBextractorLeft(extractorLeft),mpORBextractorRight(extractorRight), mTimeStamp(timeStamp), mK(K.clone()),mDistCoef(distCoef.clone()), mbf(bf), mb(0), mThDepth(thDepth),
      mpReferenceKF(static_cast<KeyFrame*>(NULL))
