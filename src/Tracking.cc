@@ -314,6 +314,10 @@ cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
  *
  * Tracking 线程
  */
+
+// 生成MapPoint：相机初始化的时候，构造frame的时候会为双目和RGBD生成，localmapping会生成
+
+
 void Tracking::Track()
 {
     // track包含两部分：估计运动、跟踪局部地图
@@ -345,7 +349,7 @@ void Tracking::Track()
         if(mState!=OK)
             return;
     }
-    else// 步骤2：跟踪
+    else// 步骤2：跟踪,即如果相机已经初始化之后就进行跟踪程序
     {
         // System is initialized. Track Frame.
 
@@ -379,7 +383,7 @@ void Tracking::Track()
                     // 将上一帧的位姿作为当前帧的初始位姿
                     // 通过BoW的方式在参考帧中找当前帧特征点的匹配点
                     // 优化每个特征点都对应3D点重投影误差即可得到位姿
-                    bOK = TrackReferenceKeyFrame();
+                    bOK = TrackReferenceKeyFrame();//将上一个关键帧作为此帧的位姿，然后用g2o进行优化
                 }
                 else
                 {
@@ -393,9 +397,9 @@ void Tracking::Track()
                         bOK = TrackReferenceKeyFrame();
                 }
             }
-            else
+            else//mbOnlyTracking为true，表示手动重定位模式
             {
-                // BOW搜索，PnP求解位姿
+                // BOW搜索，PnP求解位姿，不插入关键帧，局部地图不工作
                 bOK = Relocalization();
             }
         }
@@ -411,17 +415,17 @@ void Tracking::Track()
             {
                 bOK = Relocalization();
             }
-            else
+            else//tracking没跟丢
             {
                 // mbVO是mbOnlyTracking为true时的才有的一个变量
                 // mbVO为false表示此帧匹配了很多的MapPoints，跟踪很正常，
                 // mbVO为true表明此帧匹配了很少的MapPoints，少于10个，要跪的节奏
-                if(!mbVO)
+                if(!mbVO)//匹配了很多的mappoints，跟踪正常
                 {
                     // In last frame we tracked enough MapPoints in the map
                     // mbVO为0则表明此帧匹配了很多的3D map点，非常好
 
-                    if(!mVelocity.empty())
+                    if(!mVelocity.empty())//速度成员变量还有值，则利用匀速模型，即δR一样
                     {
                         bOK = TrackWithMotionModel();
                         // 这个地方是不是应该加上：
@@ -433,7 +437,7 @@ void Tracking::Track()
                         bOK = TrackReferenceKeyFrame();
                     }
                 }
-                else
+                else//匹配的mapPoints不够
                 {
                     // In last frame we tracked mainly "visual odometry" points.
 
@@ -498,10 +502,10 @@ void Tracking::Track()
         // local map:当前帧、当前帧的MapPoints、当前关键帧与其它关键帧共视关系
         // 在步骤2.1中主要是两两跟踪（恒速模型跟踪上一帧、跟踪参考帧），这里搜索局部关键帧后搜集所有局部MapPoints，
         // 然后将局部MapPoints和当前帧进行投影匹配，得到更多匹配的MapPoints后进行Pose优化
-        if(!mbOnlyTracking)
+        if(!mbOnlyTracking)//mbOnlyTracking为false，表示正常VO，有地图更新
         {
-            if(bOK)
-                bOK = TrackLocalMap();
+            if(bOK)//为true，表示上面每个函数都执行成功了
+                bOK = TrackLocalMap();//局部地图跟踪
         }
         else
         {
@@ -522,7 +526,7 @@ void Tracking::Track()
         // Update drawer
         mpFrameDrawer->Update(this);
 
-        // If tracking were good, check if we insert a keyframe
+        // If tracking were good, check if we insert a keyframe如果追踪成功，就检查是否需要插入关键帧
         if(bOK)
         {
             // Update motion model
@@ -531,7 +535,7 @@ void Tracking::Track()
                 // 步骤2.3：更新恒速运动模型TrackWithMotionModel中的mVelocity
                 cv::Mat LastTwc = cv::Mat::eye(4,4,CV_32F);
                 mLastFrame.GetRotationInverse().copyTo(LastTwc.rowRange(0,3).colRange(0,3));
-                mLastFrame.GetCameraCenter().copyTo(LastTwc.rowRange(0,3).col(3));
+                mLastFrame.GetCameraCenter().copyTo(LastTwc.rowRange(0,3).col(3));//mLastFrame的旋转平移矩阵赋给LastTwc
                 mVelocity = mCurrentFrame.mTcw*LastTwc; // Tcl
             }
             else
@@ -567,6 +571,7 @@ void Tracking::Track()
 
             // Check if we need to insert a new keyframe
             // 步骤2.6：检测并插入关键帧，对于双目会产生新的MapPoints
+            //创建关键帧，当很长时间没有插入关键帧、局部地图空闲、跟踪快要跪、跟踪地图的MapPoints的比例比较少 的时候必须插入关键帧
             if(NeedNewKeyFrame())
                 CreateNewKeyFrame();
 
@@ -594,7 +599,8 @@ void Tracking::Track()
             }
         }
 
-        if(!mCurrentFrame.mpReferenceKF)
+        if(!mCurrentFrame.mpReferenceKF)//如果没有跟丢，且当前帧的关键帧为空，则插入关键帧  493行不是已经插入了吗，为何还要再次赋值？？？
+
             mCurrentFrame.mpReferenceKF = mpReferenceKF;
 
         // 保存上一帧的数据
@@ -1215,6 +1221,7 @@ bool Tracking::TrackLocalMap()
 {
     // We have an estimation of the camera pose and some map points tracked in the frame.
     // We retrieve the local map and try to find matches to points in the local map.
+    //已经对相机位姿进行了估计，帧中追踪到了一些地图点，我们恢复局部地图，尝试在局部地图中找到匹配点
 
     // Update Local KeyFrames and Local Points
     // 步骤1：更新局部关键帧mvpLocalKeyFrames和局部地图点mvpLocalMapPoints
@@ -1226,7 +1233,7 @@ bool Tracking::TrackLocalMap()
     // Optimize Pose
     // 在这个函数之前，在Relocalization、TrackReferenceKeyFrame、TrackWithMotionModel中都有位姿优化，
     // 步骤3：更新局部所有MapPoints后对位姿再次优化
-    Optimizer::PoseOptimization(&mCurrentFrame);
+    Optimizer::PoseOptimization(&mCurrentFrame);//最小化重投影误差优化位姿
     mnMatchesInliers = 0;
 
     // Update MapPoints Statistics
@@ -1279,7 +1286,7 @@ bool Tracking::NeedNewKeyFrame()
         return false;
 
     // If Local Mapping is freezed by a Loop Closure do not insert keyframes
-    // 如果局部地图被闭环检测使用，则不插入关键帧
+    // 如果局部地图被闭环检测使用，则不插入关键帧，即如果局部地图空闲，则需要插入关键帧
     if(mpLocalMapper->isStopped() || mpLocalMapper->stopRequested())
         return false;
 
@@ -1397,6 +1404,8 @@ bool Tracking::NeedNewKeyFrame()
  *
  * 对于非单目的情况，同时创建新的MapPoints
  */
+//创建关键帧，当很长时间没有插入关键帧、局部地图空闲、跟踪快要跪、跟踪地图的MapPoints的比例比较少 的时候必须插入关键帧，
+
 void Tracking::CreateNewKeyFrame()
 {
     if(!mpLocalMapper->SetNotStop(true))
