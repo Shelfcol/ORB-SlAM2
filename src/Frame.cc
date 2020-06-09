@@ -189,8 +189,8 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     // Frame ID
     mnId=nNextId++;
 
-    // Scale Level Info
-    mnScaleLevels = mpORBextractorLeft->GetLevels();
+    // Scale Level Info  尺度水平信息如何得来的
+    mnScaleLevels = mpORBextractorLeft->GetLevels();//mpORBextractor：Leftfeture extract
     mfScaleFactor = mpORBextractorLeft->GetScaleFactor();
     mfLogScaleFactor = log(mfScaleFactor);
     mvScaleFactors = mpORBextractorLeft->GetScaleFactors();
@@ -199,27 +199,30 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
 
     // ORB extraction
-    ExtractORB(0,imGray);
+    ExtractORB(0,imGray);//0表示提取作图的图片，得到提取的orb，保存到mvKeys,mDescriptors
 
     N = mvKeys.size();
 
     if(mvKeys.empty())
         return;
 
-    // 调用OpenCV的矫正函数矫正orb提取的特征点
+    // 调用OpenCV的矫正函数矫正orb提取的特征点，保存到mvKeysUn
     UndistortKeyPoints();
 
+
+	// Corresponding stereo coordinate and depth for each keypoint.
+	// "Monocular" keypoints have a negative value.
     // Set no stereo information
-    mvuRight = vector<float>(N,-1);
+    mvuRight = vector<float>(N,-1);//单目的是负值
     mvDepth = vector<float>(N,-1);
 
-    mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));
-    mvbOutlier = vector<bool>(N,false);
+    mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));//与关键点关联的mappoints，如果没关联则为空指针
+    mvbOutlier = vector<bool>(N,false);//Flag to identify outlier associations.，保存是否是outlier点
 
     // This is done only for the first Frame (or after a change in the calibration)
     if(mbInitialComputations)
     {
-        ComputeImageBounds(imGray);
+        ComputeImageBounds(imGray);//校正四个边界点的畸变
 
         mfGridElementWidthInv=static_cast<float>(FRAME_GRID_COLS)/static_cast<float>(mnMaxX-mnMinX);
         mfGridElementHeightInv=static_cast<float>(FRAME_GRID_ROWS)/static_cast<float>(mnMaxY-mnMinY);
@@ -234,9 +237,9 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
         mbInitialComputations=false;
     }
 
-    mb = mbf/fx;
+    mb = mbf/fx;//mb 双目基准线（m）
 
-    AssignFeaturesToGrid();
+    AssignFeaturesToGrid();//将去畸变之后落在图片四个角外面的orb去除，这里用的mGrid来保存不在外面的orb序号
 }
 
 void Frame::AssignFeaturesToGrid()
@@ -244,7 +247,9 @@ void Frame::AssignFeaturesToGrid()
     int nReserve = 0.5f*N/(FRAME_GRID_COLS*FRAME_GRID_ROWS);
     for(unsigned int i=0; i<FRAME_GRID_COLS;i++)
         for (unsigned int j=0; j<FRAME_GRID_ROWS;j++)
-            mGrid[i][j].reserve(nReserve);
+            mGrid[i][j].reserve(nReserve);//vector的reserve：capacity是容器可存储的最大总数，size是当前容器存储的个数
+										  //reserve()只修改capacity大小，不修改size大小，
+										  //resize()既修改capacity大小，也修改size大小。
 
     // 在mGrid中记录了各特征点
     for(int i=0;i<N;i++)
@@ -252,7 +257,8 @@ void Frame::AssignFeaturesToGrid()
         const cv::KeyPoint &kp = mvKeysUn[i];
 
         int nGridPosX, nGridPosY;
-        if(PosInGrid(kp,nGridPosX,nGridPosY))
+        if(PosInGrid(kp,nGridPosX,nGridPosY))//会返回nGridPos，看看kp里面的点是不是在这一帧图像里面，如果在的话，则将mvKeysUn的序号填入mGrid里面
+											 //因为有可能图像去畸变以后，关键点跑到图片外面了
             mGrid[nGridPosX][nGridPosY].push_back(i);
     }
 }
@@ -379,7 +385,8 @@ bool Frame::isInFrustum(MapPoint *pMP, float viewingCosLimit)
  * @param maxLevel 最大尺度
  * @return         满足条件的特征点的序号
  */
-vector<size_t> Frame::GetFeaturesInArea(const float &x, const float  &y, const float  &r, const int minLevel, const int maxLevel) const
+vector<size_t> Frame::
+GetFeaturesInArea(const float &x, const float  &y, const float  &r, const int minLevel, const int maxLevel) const
 {
     vector<size_t> vIndices;
     vIndices.reserve(N);
@@ -461,7 +468,7 @@ void Frame::ComputeBoW()
     }
 }
 
-// 调用OpenCV的矫正函数矫正orb提取的特征点
+// 调用OpenCV的矫正函数矫正orb提取的特征点，因为相机有畸变，所以需要将orb坐标点去畸变
 void Frame::UndistortKeyPoints()
 {
     // 如果没有图像是矫正过的，没有失真

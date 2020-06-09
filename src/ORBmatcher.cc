@@ -480,27 +480,32 @@ int ORBmatcher::SearchByProjection(KeyFrame* pKF, cv::Mat Scw, const vector<MapP
 }
 
 // 初始化时假设F1和F2图像变化不大，在windowSize范围进行匹配，外部调用中windowSize = 100
+//在F1与F2中找匹配的特征点对
+// vbPrevMatched为前一帧的特征点，存储了F1中哪些点（mvKeysUn）将进行接下来的匹配
+// vnMatches12存储F1,F2之间匹配的特征点
 int ORBmatcher::SearchForInitialization(Frame &F1, Frame &F2, vector<cv::Point2f> &vbPrevMatched, vector<int> &vnMatches12, int windowSize)
 {
     int nmatches=0;
-    vnMatches12 = vector<int>(F1.mvKeysUn.size(),-1);
+    vnMatches12 = vector<int>(F1.mvKeysUn.size(),-1);//mvKeysUn保存的是当前帧里面经过畸变矫正的关键点坐标
 
-    vector<int> rotHist[HISTO_LENGTH];
+    vector<int> rotHist[HISTO_LENGTH];//HISTO_LENGTH=30
     for(int i=0;i<HISTO_LENGTH;i++)
         rotHist[i].reserve(500);
     const float factor = HISTO_LENGTH/360.0f;
 
-    vector<int> vMatchedDistance(F2.mvKeysUn.size(),INT_MAX);
+    vector<int> vMatchedDistance(F2.mvKeysUn.size(),INT_MAX);//初始化成长度为F2.mvKeysUn.size()，数值为INT_MAX的vector
     vector<int> vnMatches21(F2.mvKeysUn.size(),-1);
 
-    for(size_t i1=0, iend1=F1.mvKeysUn.size(); i1<iend1; i1++)
+    for(size_t i1=0, iend1=F1.mvKeysUn.size(); i1<iend1; i1++)//遍历当前关键点
     {
         cv::KeyPoint kp1 = F1.mvKeysUn[i1];
-        int level1 = kp1.octave;
-        if(level1>0)
+        int level1 = kp1.octave;//octave：代表是从金字塔哪一层提取的得到的数据。
+
+        if(level1>0)//？？？
             continue;
 
-        vector<size_t> vIndices2 = F2.GetFeaturesInArea(vbPrevMatched[i1].x,vbPrevMatched[i1].y, windowSize,level1,level1);
+        vector<size_t> vIndices2 = F2.GetFeaturesInArea(vbPrevMatched[i1].x,vbPrevMatched[i1].y, 
+			,level1,level1);
 
         if(vIndices2.empty())
             continue;

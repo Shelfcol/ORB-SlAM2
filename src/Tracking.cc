@@ -325,7 +325,7 @@ void Tracking::Track()
     // mState为tracking的状态机
     // SYSTME_NOT_READY, NO_IMAGE_YET, NOT_INITIALIZED, OK, LOST
     // 如果图像复位过、或者第一次运行，则为NO_IMAGE_YET状态
-    if(mState==NO_IMAGES_YET)
+    if(mState==NO_IMAGES_YET)//没有图片，则系统未初始化，则需要初始化
     {
         mState = NOT_INITIALIZED;
     }
@@ -731,8 +731,8 @@ void Tracking::MonocularInitialization()
     if(!mpInitializer)
     {
         // Set Reference Frame
-        // 单目初始帧提取的特征点数必须大于100，否则放弃该帧图像
-        if(mCurrentFrame.mvKeys.size()>100)
+        // 单目初始帧提取的特征点数必须大于100，否则放弃该帧图像，重新抓取图片进行初始化
+        if(mCurrentFrame.mvKeys.size()>100)//mCurrentFrame是输入图片构造的Frame
         {
             // 步骤1：得到用于初始化的第一帧，初始化需要两帧
             mInitialFrame = Frame(mCurrentFrame);
@@ -741,16 +741,16 @@ void Tracking::MonocularInitialization()
             // mvbPrevMatched最大的情况就是所有特征点都被跟踪上
             mvbPrevMatched.resize(mCurrentFrame.mvKeysUn.size());
             for(size_t i=0; i<mCurrentFrame.mvKeysUn.size(); i++)
-                mvbPrevMatched[i]=mCurrentFrame.mvKeysUn[i].pt;
+                mvbPrevMatched[i]=mCurrentFrame.mvKeysUn[i].pt;//把当前帧的去除畸变的关键点的坐标值存到mvbPrevMatched里面
 
-            // 这两句是多余的
+            // 这两句是多余的，因为还未创建mpInitializer，所以delete没有意义，但是下面767行 mpInitializer = static_cast<Initializer*>(NULL)初始化了一个空指针，是用来干啥的？？？？
             if(mpInitializer)
                 delete mpInitializer;
 
-            // 由当前帧构造初始器 sigma:1.0 iterations:200
-            mpInitializer =  new Initializer(mCurrentFrame,1.0,200);
+            // 由当前帧构造初始器   (测量误差）sigma:1.0 RANSAC iterations:200
+            mpInitializer =  new Initializer(mCurrentFrame,1.0,200);//里面主要保存关键点和矫正参数矩阵
 
-            fill(mvIniMatches.begin(),mvIniMatches.end(),-1);
+            fill(mvIniMatches.begin(),mvIniMatches.end(),-1);//fill用于填充vector的，把mvIniMatches从begin到end都填上-1
 
             return;
         }
@@ -763,17 +763,19 @@ void Tracking::MonocularInitialization()
         // 因此只有连续两帧的特征点个数都大于100时，才能继续进行初始化过程
         if((int)mCurrentFrame.mvKeys.size()<=100)
         {
-            delete mpInitializer;
-            mpInitializer = static_cast<Initializer*>(NULL);
+            delete mpInitializer;//单目用相邻两帧进行进行初始化
+            mpInitializer = static_cast<Initializer*>(NULL);//这里初始化一个Initializer的空指针变量mpInitializer
+															//这里是不是只是预先分配内存？？
             fill(mvIniMatches.begin(),mvIniMatches.end(),-1);
             return;
         }
 
         // Find correspondences
         // 步骤3：在mInitialFrame与mCurrentFrame中找匹配的特征点对
-        // mvbPrevMatched为前一帧的特征点，存储了mInitialFrame中哪些点将进行接下来的匹配
-        // mvIniMatches存储mInitialFrame,mCurrentFrame之间匹配的特征点
-        ORBmatcher matcher(0.9,true);
+        // mvbPrevMatched为前一帧的特征点，存储了mInitialFrame中哪些点（mvKeysUn）将进行接下来的匹配
+        // mvIniMatches存储mInitialFrame,mCurrentFrame
+        ORBmatcher matcher(0.9,true);// nnratio  ratio of the best and the second score，checkOri check orientation
+		//初始化时假设F1和F2图像变化不大，在windowSize范围进行匹配，外部调用中windowSize = 100
         int nmatches = matcher.SearchForInitialization(mInitialFrame,mCurrentFrame,mvbPrevMatched,mvIniMatches,100);
 
         // Check if there are enough correspondences

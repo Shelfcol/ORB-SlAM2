@@ -51,6 +51,7 @@ Initializer::Initializer(const Frame &ReferenceFrame, float sigma, int iteration
 
 /**
  * @brief 并行地计算基础矩阵和单应性矩阵，选取其中一个模型，恢复出最开始两帧之间的相对姿态以及点云
+ 单目相机初始化
  */
 bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &vMatches12, cv::Mat &R21, cv::Mat &t21,
                              vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated)
@@ -60,7 +61,7 @@ bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &vMatc
     // Frame2 特征点
     mvKeys2 = CurrentFrame.mvKeysUn;
 
-    // mvMatches12记录匹配上的特征点对
+    // mvMatches12记录匹配上的特征点对，数量的上限是第二帧的关键点数量
     mvMatches12.clear();
     mvMatches12.reserve(mvKeys2.size());
     // mvbMatched1记录每个特征点是否有匹配的特征点，
@@ -72,11 +73,11 @@ bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &vMatc
     {
         if(vMatches12[i]>=0)
         {
-            mvMatches12.push_back(make_pair(i,vMatches12[i]));
+            mvMatches12.push_back(make_pair(i,vMatches12[i]));//  mvMatches12类型 pair<int,int>变量  将两帧匹配得到的匹配点的值和位置放到mvMatches12里面
             mvbMatched1[i]=true;
         }
         else
-            mvbMatched1[i]=false;
+            mvbMatched1[i]=false;//表示match数量为0
     }
 
     // 匹配上的特征点的个数
@@ -97,19 +98,19 @@ bool Initializer::Initialize(const Frame &CurrentFrame, const vector<int> &vMatc
     // 步骤2：在所有匹配特征点对中随机选择8对匹配特征点为一组，共选择mMaxIterations组
     // 用于FindHomography和FindFundamental求解
     // mMaxIterations:200
-    mvSets = vector< vector<size_t> >(mMaxIterations,vector<size_t>(8,0));
+    mvSets = vector< vector<size_t> >(mMaxIterations,vector<size_t>(8,0));//生成  mMaxIterations行  8列  的vector
 
-    DUtils::Random::SeedRandOnce(0);
+    DUtils::Random::SeedRandOnce(0);//用于产生随机数的种子
 
     for(int it=0; it<mMaxIterations; it++)
     {
-        vAvailableIndices = vAllIndices;
+        vAvailableIndices = vAllIndices;//每选完8个点后则vAvailableIndices的值重新附为全部索引
 
         // Select a minimum set
         for(size_t j=0; j<8; j++)
         {
             // 产生0到N-1的随机数
-            int randi = DUtils::Random::RandomInt(0,vAvailableIndices.size()-1);
+            int randi = DUtils::Random::RandomInt(0,vAvailableIndices.size()-1);//生成一个范围的整数点
             // idx表示哪一个索引对应的特征点被选中
             int idx = vAvailableIndices[randi];
 
@@ -178,8 +179,8 @@ void Initializer::FindHomography(vector<bool> &vbMatchesInliers, float &score, c
     vbMatchesInliers = vector<bool>(N,false);
 
     // Iteration variables
-    vector<cv::Point2f> vPn1i(8);
-    vector<cv::Point2f> vPn2i(8);
+    vector<cv::Point2f> vPn1i(8);//保存第一帧的特征点的坐标
+    vector<cv::Point2f> vPn2i(8);//保存第二帧的特征点的坐标
     cv::Mat H21i, H12i;
     // 每次RANSAC的MatchesInliers与得分
     vector<bool> vbCurrentInliers(N,false);
@@ -199,7 +200,7 @@ void Initializer::FindHomography(vector<bool> &vbMatchesInliers, float &score, c
             vPn2i[j] = vPn2[mvMatches12[idx].second];
         }
 
-        cv::Mat Hn = ComputeH21(vPn1i,vPn2i);
+        cv::Mat Hn = ComputeH21(vPn1i,vPn2i);//八组对应点求解单应矩阵
         // 恢复原始的均值和尺度
         H21i = T2inv*Hn*T1;
         H12i = H21i.inv();
@@ -291,12 +292,16 @@ void Initializer::FindFundamental(vector<bool> &vbMatchesInliers, float &score, 
  * @param  vP2 归一化后的点, in current frame
  * @return     单应矩阵
  * @see        Multiple View Geometry in Computer Vision - Algorithm 4.2 p109
+
+ u=λhv
+ 利用DLT将其转化为Ah=0，对A进行SVD分解，A的最小的奇异值对应的右奇异向量即是h的解。对h做reshape得到H
+
  */
 cv::Mat Initializer::ComputeH21(const vector<cv::Point2f> &vP1, const vector<cv::Point2f> &vP2)
 {
     const int N = vP1.size();
 
-    cv::Mat A(2*N,9,CV_32F); // 2N*9
+    cv::Mat A(2*N,9,CV_32F); // 2N*9，一组点的到一部分为2*9
 
     for(int i=0; i<N; i++)
     {
@@ -327,11 +332,11 @@ cv::Mat Initializer::ComputeH21(const vector<cv::Point2f> &vP1, const vector<cv:
 
     }
 
-    cv::Mat u,w,vt;
+    cv::Mat u,w,vt;//vt表示v转置，其实得到的是未转置的V
 
     cv::SVDecomp(A,w,u,vt,cv::SVD::MODIFY_A | cv::SVD::FULL_UV);
 
-    return vt.row(8).reshape(0, 3); // v的最后一列
+    return vt.row(8).reshape(0, 3); // v的最后一列就是单应矩阵？？？？
 }
 
 // x'Fx = 0 整理可得：Af = 0
@@ -986,7 +991,7 @@ void Initializer::Normalize(const vector<cv::KeyPoint> &vKeys, vector<cv::Point2
     meanX = meanX/N;
     meanY = meanY/N;
 
-    float meanDevX = 0;
+    float meanDevX = 0;//保存去中心化后x坐标与原点的平均偏差
     float meanDevY = 0;
 
     // 将所有vKeys点减去中心坐标，使x坐标和y坐标均值分别为0
@@ -1005,7 +1010,7 @@ void Initializer::Normalize(const vector<cv::KeyPoint> &vKeys, vector<cv::Point2
     float sX = 1.0/meanDevX;
     float sY = 1.0/meanDevY;
 
-    // 将x坐标和y坐标分别进行尺度缩放，使得x坐标和y坐标的一阶绝对矩分别为1
+    // 将x坐标和y坐标分别进行尺度缩放，使得x坐标和y坐标的一阶绝对矩分别为1，即将xy坐标与原点的偏离距离归一化，变成1
     for(int i=0; i<N; i++)
     {
         vNormalizedPoints[i].x = vNormalizedPoints[i].x * sX;

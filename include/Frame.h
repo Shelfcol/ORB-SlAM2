@@ -116,7 +116,7 @@ public:
     static float cy;
     static float invfx;
     static float invfy;
-    cv::Mat mDistCoef;
+    cv::Mat mDistCoef;//判定是否矫正过，.at<float>(0)==0.0则矫正过
 
     // Stereo baseline multiplied by fx.
     float mbf;
@@ -134,8 +134,8 @@ public:
     // Vector of keypoints (original for visualization) and undistorted (actually used by the system).
     // In the stereo case, mvKeysUn is redundant as images must be rectified.
     // In the RGB-D case, RGB images can be distorted.
-    std::vector<cv::KeyPoint> mvKeys, mvKeysRight;
-    std::vector<cv::KeyPoint> mvKeysUn;
+    std::vector<cv::KeyPoint> mvKeys, mvKeysRight;//mvKeys保存当前帧得到的关键点
+    std::vector<cv::KeyPoint> mvKeysUn;//保存校正过得orb特征点
 
     // Corresponding stereo coordinate and depth for each keypoint.
     // "Monocular" keypoints have a negative value.

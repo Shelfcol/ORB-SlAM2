@@ -225,10 +225,10 @@ cv::Mat System::TrackMonocular(const cv::Mat &im, const double &timestamp)
 
     // Check mode change
     {
-        unique_lock<mutex> lock(mMutexMode);
+        unique_lock<mutex> lock(mMutexMode);//mMutexMode这个线程被这里占用，只有等这里休眠的视乎才能执行mMutexMode其他位置的线程
         if(mbActivateLocalizationMode)
         {
-            mpLocalMapper->RequestStop();
+            mpLocalMapper->RequestStop();//管理局部地图进行局部BA
 
             // Wait until Local Mapping has effectively stopped
             while(!mpLocalMapper->isStopped())
@@ -237,7 +237,7 @@ cv::Mat System::TrackMonocular(const cv::Mat &im, const double &timestamp)
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
 
-            mpTracker->InformOnlyTracking(true);// 定位时，只跟踪
+            mpTracker->InformOnlyTracking(true);// 给你mbOnlyTracking变量赋值，为true只进行跟踪和重定位，不插入关键帧，局部地图不工作
             mbActivateLocalizationMode = false;// 防止重复执行
         }
         if(mbDeactivateLocalizationMode)

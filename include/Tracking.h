@@ -86,8 +86,8 @@ public:
         LOST=3
     };
 
-    eTrackingState mState;
-    eTrackingState mLastProcessedState;
+    eTrackingState mState;//tracking模式的状态机
+    eTrackingState mLastProcessedState;//保存最后一个tracking模式的状态
 
     // Input sensor
     int mSensor;
