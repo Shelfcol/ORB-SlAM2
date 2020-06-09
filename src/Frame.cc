@@ -134,7 +134,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
     // Frame ID
     mnId=nNextId++;
 
-    // Scale Level Info
+    // Scale Level Info???
     mnScaleLevels = mpORBextractorLeft->GetLevels();
     mfScaleFactor = mpORBextractorLeft->GetScaleFactor();    
     mfLogScaleFactor = log(mfScaleFactor);
@@ -143,15 +143,15 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
     mvLevelSigma2 = mpORBextractorLeft->GetScaleSigmaSquares();
     mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
 
-    // ORB extraction
+    // ORB extraction 没有返回值？？？
     ExtractORB(0,imGray);
 
-    N = mvKeys.size();
+    N = mvKeys.size();//图片的关键点数量
 
     if(mvKeys.empty())
         return;
 
-    UndistortKeyPoints();
+    UndistortKeyPoints();// 调用OpenCV的矫正函数矫正orb提取的特征点
 
     ComputeStereoFromRGBD(imDepth);
 
