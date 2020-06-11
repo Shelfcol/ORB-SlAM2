@@ -43,7 +43,7 @@ int main(int argc, char **argv)
     }
 
     // Retrieve paths to images
-    vector<string> vstrImageFilenames;
+    vector<string> vstrImageFilenames;//利用LoadImage函数将所有的图片和时间戳加载到两个vector里面
     vector<double> vTimestamps;
     LoadImages(string(argv[3]), vstrImageFilenames, vTimestamps);
 
@@ -94,7 +94,7 @@ int main(int argc, char **argv)
 
         vTimesTrack[ni]=ttrack;
 
-        // Wait to load the next frame
+        // Wait to load the next frame，使图片的加载和实际拍摄的时间一样
         double T=0;
         if(ni<nImages-1)
             T = vTimestamps[ni+1]-tframe;

@@ -26,9 +26,10 @@
 #include <pangolin/pangolin.h>
 #include <iostream>     // std::cout, std::fixed
 #include <iomanip>		// std::setprecision
-bool has_suffix(const std::string &str, const std::string &suffix) {
-  std::size_t index = str.find(suffix, str.size() - suffix.size());
-  return (index != std::string::npos);
+bool has_suffix(const std::string &str, const std::string &suffix) //判断str的末尾是否为suffix
+{
+  std::size_t index = str.find(suffix, str.size() - suffix.size());//指定位置找到suffix，则返回index
+  return (index != std::string::npos);//npos=-1
 }
 
 namespace ORB_SLAM2
@@ -54,8 +55,8 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     else if(mSensor==RGBD)
         cout << "RGB-D" << endl;
 
-    //Check settings file
-    cv::FileStorage fsSettings(strSettingsFile.c_str(), cv::FileStorage::READ);
+    //Check settings file   strSettingsFile就是数据集的摄像头的yaml配置文件地址
+    cv::FileStorage fsSettings(strSettingsFile.c_str(), cv::FileStorage::READ);//数据只读操作
     if(!fsSettings.isOpened())
     {
        cerr << "Failed to open settings file at: " << strSettingsFile << endl;
@@ -66,10 +67,10 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     //Load ORB Vocabulary
     cout << endl << "Loading ORB Vocabulary. This could take a while..." << endl;
 
-    mpVocabulary = new ORBVocabulary();
+    mpVocabulary = new ORBVocabulary();//保存载入的词带
     bool bVocLoad = false; // chose loading method based on file extension
-    if (has_suffix(strVocFile, ".txt"))
-	  bVocLoad = mpVocabulary->loadFromTextFile(strVocFile);
+    if (has_suffix(strVocFile, ".txt"))//判断strVocFile的类型
+	  bVocLoad = mpVocabulary->loadFromTextFile(strVocFile);//加载VocFile
 	else if(has_suffix(strVocFile, ".bin"))
 	  bVocLoad = mpVocabulary->loadFromBinaryFile(strVocFile);
 	else
@@ -82,7 +83,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     }
     cout << "Vocabulary loaded!" << endl << endl;
 
-    //Create KeyFrame Database
+    //Create KeyFrame Database，里面有关键帧的add erase clear
     mpKeyFrameDatabase = new KeyFrameDatabase(*mpVocabulary);
 
     //Create the Map
@@ -94,6 +95,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
 
     //Initialize the Tracking thread
     //(it will live in the main thread of execution, the one that called this constructor)
+	//里面读取了yaml配置文件，初始化了mpORBextractorLeft，mpORBextractorRight（stereo），mpIniORBextractor（单目初始化）
     mpTracker = new Tracking(this, mpVocabulary, mpFrameDrawer, mpMapDrawer,
                              mpMap, mpKeyFrameDatabase, strSettingsFile, mSensor);
 
@@ -225,7 +227,7 @@ cv::Mat System::TrackMonocular(const cv::Mat &im, const double &timestamp)
 
     // Check mode change
     {
-        unique_lock<mutex> lock(mMutexMode);//mMutexMode这个线程被这里占用，只有等这里休眠的视乎才能执行mMutexMode其他位置的线程
+        unique_lock<mutex> lock(mMutexMode);//mMutexMode这个线程被这里占用，只有等这里休眠的时候才能执行mMutexMode其他位置的线程
         if(mbActivateLocalizationMode)
         {
             mpLocalMapper->RequestStop();//管理局部地图进行局部BA
