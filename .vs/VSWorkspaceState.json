@@ -1,8 +1,9 @@
 {
   "ExpandedNodes": [
     "",
+    "\\Examples\\Monocular",
     "\\src"
   ],
-  "SelectedNode": "\\src\\ORBmatcher.cc",
+  "SelectedNode": "\\Examples",
   "PreviewInSolutionExplorer": false
 }

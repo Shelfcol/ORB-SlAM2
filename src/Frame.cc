@@ -143,7 +143,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
     mvLevelSigma2 = mpORBextractorLeft->GetScaleSigmaSquares();
     mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
 
-    // ORB extraction 没有返回值？？？
+    // ORB extraction，得到mvKeys,mDescriptors
     ExtractORB(0,imGray);
 
     N = mvKeys.size();//图片的关键点数量
@@ -193,7 +193,8 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     mnScaleLevels = mpORBextractorLeft->GetLevels();//mpORBextractor：Leftfeture extract
     mfScaleFactor = mpORBextractorLeft->GetScaleFactor();
     mfLogScaleFactor = log(mfScaleFactor);
-    mvScaleFactors = mpORBextractorLeft->GetScaleFactors();
+
+    mvScaleFactors = mpORBextractorLeft->GetScaleFactors();//此时应该还是空集
     mvInvScaleFactors = mpORBextractorLeft->GetInverseScaleFactors();
     mvLevelSigma2 = mpORBextractorLeft->GetScaleSigmaSquares();
     mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
@@ -263,10 +264,12 @@ void Frame::AssignFeaturesToGrid()
     }
 }
 
+
 void Frame::ExtractORB(int flag, const cv::Mat &im)
 {
+	//提取结果被保存在Frame类的成员变量std::vector<cv:KeyPoint> mvKeys和cv:Mat mDescriptors中
     if(flag==0)
-        (*mpORBextractorLeft)(im,cv::Mat(),mvKeys,mDescriptors);
+        (*mpORBextractorLeft)(im,cv::Mat(),mvKeys,mDescriptors);//ORBextractor重载了(), ORBextractor.h 59
     else
         (*mpORBextractorRight)(im,cv::Mat(),mvKeysRight,mDescriptorsRight);
 }
