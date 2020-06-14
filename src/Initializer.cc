@@ -40,9 +40,9 @@ namespace ORB_SLAM2
  */
 Initializer::Initializer(const Frame &ReferenceFrame, float sigma, int iterations)
 {
-    mK = ReferenceFrame.mK.clone();
+    mK = ReferenceFrame.mK.clone();//标定矩阵
 
-    mvKeys1 = ReferenceFrame.mvKeysUn;
+    mvKeys1 = ReferenceFrame.mvKeysUn;//保存KeyPoints
 
     mSigma = sigma;
     mSigma2 = sigma*sigma;

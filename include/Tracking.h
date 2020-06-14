@@ -99,9 +99,9 @@ public:
     // Initialization Variables (Monocular)
     std::vector<int> mvIniLastMatches;
     std::vector<int> mvIniMatches;
-    std::vector<cv::Point2f> mvbPrevMatched;
+    std::vector<cv::Point2f> mvbPrevMatched;//上一帧的关键点
     std::vector<cv::Point3f> mvIniP3D;
-    Frame mInitialFrame;
+    Frame mInitialFrame;//初始化时保存上一帧的Frame
 
     // Lists used to recover the full camera trajectory at the end of the execution.
     // Basically we store the reference keyframe for each frame and its relative transformation

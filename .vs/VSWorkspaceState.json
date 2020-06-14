@@ -1,9 +1,8 @@
 {
   "ExpandedNodes": [
     "",
-    "\\Examples\\Monocular",
     "\\src"
   ],
-  "SelectedNode": "\\Examples",
+  "SelectedNode": "\\src\\ORBextractor.cc",
   "PreviewInSolutionExplorer": false
 }

@@ -28,7 +28,7 @@ namespace ORB_SLAM2
 
 long unsigned int Frame::nNextId=0;
 bool Frame::mbInitialComputations=true;
-float Frame::cx, Frame::cy, Frame::fx, Frame::fy, Frame::invfx, Frame::invfy;
+float Frame::cx, Frame::cy, Frame::fx, Frame::fy, Frame::invfx, Frame::invfy;//Frame.cc中232处赋值
 float Frame::mnMinX, Frame::mnMinY, Frame::mnMaxX, Frame::mnMaxY;
 float Frame::mfGridElementWidthInv, Frame::mfGridElementHeightInv;
 
@@ -189,7 +189,7 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     // Frame ID
     mnId=nNextId++;
 
-    // Scale Level Info  尺度水平信息如何得来的
+    // Scale Level Info  
     mnScaleLevels = mpORBextractorLeft->GetLevels();//mpORBextractor：Leftfeture extract
     mfScaleFactor = mpORBextractorLeft->GetScaleFactor();
     mfLogScaleFactor = log(mfScaleFactor);
@@ -221,6 +221,7 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     mvbOutlier = vector<bool>(N,false);//Flag to identify outlier associations.，保存是否是outlier点
 
     // This is done only for the first Frame (or after a change in the calibration)
+
     if(mbInitialComputations)
     {
         ComputeImageBounds(imGray);//校正四个边界点的畸变
@@ -527,7 +528,7 @@ void Frame::ComputeImageBounds(const cv::Mat &imLeft)
         mat=mat.reshape(2);
         cv::undistortPoints(mat,mat,mK,mDistCoef,cv::Mat(),mK);
         mat=mat.reshape(1);
-
+		//默认桶型畸变，否则应该将图片中间加入判断
         mnMinX = min(mat.at<float>(0,0),mat.at<float>(2,0));//左上和左下横坐标最小的
         mnMaxX = max(mat.at<float>(1,0),mat.at<float>(3,0));//右上和右下横坐标最大的
         mnMinY = min(mat.at<float>(0,1),mat.at<float>(1,1));//左上和右上纵坐标最小的

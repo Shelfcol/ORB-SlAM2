@@ -915,7 +915,7 @@ void ORBextractor::ComputeKeyPointsOctTree(vector<vector<KeyPoint> >& allKeypoin
 				//输入参数
 				//mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX) level层的图片中行范围(iniY,maxY),列范围(iniX,maxX)的截图
 				//vKeysCell，储存提取的fast关键点
-				//iniThFAST提取角点的阈值
+				//iniThFAST提取角点的阈值,即周围像素的灰度值与中心像素的灰度值之差
 				//true 是否开启非极大值抑制算法
 				
                 vector<cv::KeyPoint> vKeysCell;
@@ -928,6 +928,7 @@ void ORBextractor::ComputeKeyPointsOctTree(vector<vector<KeyPoint> >& allKeypoin
                     FAST(mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX),
                          vKeysCell,minThFAST,true);
                 }
+
 				//如果找到的点不为空，就加入到vToDistributeKeys
                 if(!vKeysCell.empty())
                 {
@@ -949,13 +950,12 @@ void ORBextractor::ComputeKeyPointsOctTree(vector<vector<KeyPoint> >& allKeypoin
 		//而resize改变了vector的capacity同时也增加了它的size，当加入新的元素时，用operator[]操作符，或者用迭代器来引用元素对象。此时再调用push_back()函数，是加在这个新的空间后面的。！
 		
 
-        // 根据mnFeaturesPerLevel，即该层的兴趣点数,对特征点进行剔除
+        // 根据mnFeaturesPerLevel，即该层的兴趣点数,对超过mnFeaturesPerLevel特征点进行剔除
         keypoints = DistributeOctTree(vToDistributeKeys, minBorderX, maxBorderX,
                                       minBorderY, maxBorderY,mnFeaturesPerLevel[level], level);
 
 		//计算在本层提取出的关键点对应的Patch大小，称为scaledPatchSize
-		//你想想，本层的图像是缩小的，而你在本层提取的orb特征点，计算orb的方向，描述子的时候根据
-		//的PATCH大小依旧是PATCH_SIZE。
+		//你想想，本层的图像是缩小的，而你在本层提取的orb特征点，计算orb的方向，描述子的时候根据的PATCH大小依旧是PATCH_SIZE。
 		//而你在本层提取的orb是要恢复到原始图像上去的，所以其特征点的size（代表特征点的尺度信息）需要放大。
 
         const int scaledPatchSize = PATCH_SIZE*mvScaleFactor[level];
@@ -964,14 +964,14 @@ void ORBextractor::ComputeKeyPointsOctTree(vector<vector<KeyPoint> >& allKeypoin
         const int nkps = keypoints.size();
         for(int i=0; i<nkps ; i++)
         {
-            keypoints[i].pt.x+=minBorderX;//？？？
+            keypoints[i].pt.x+=minBorderX;//因为每块都+minBorderX之后计算的关键点位置
             keypoints[i].pt.y+=minBorderY;
             keypoints[i].octave=level;
             keypoints[i].size = scaledPatchSize;//特征点的size需要放大
         }
     }
 
-    // compute orientations
+    // compute orientations，根据书上的公式，计算特征点方向
     for (int level = 0; level < nlevels; ++level)
         computeOrientation(mvImagePyramid[level], allKeypoints[level], umax);
 }
@@ -1203,15 +1203,16 @@ void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPo
 	//算出实际提取出来的关键点数量nkeypoints
 	//新建descriptors对象，特征点的描述子将存在这里
 	//descriptors就好似nkeypoints*32维的矩阵，矩阵里存着一个uchar，其单位为8bit
-	//这样对于每个关键点，就对应有32*8=256bit的二进制向量作为描述子
+	//这样对于每个关键点，就对应有32*8=256bit的二进制向量作为描述子，相当于每个特征点都对应于128维二进制的pq向量
 	
     int nkeypoints = 0;
     for (int level = 0; level < nlevels; ++level)
         nkeypoints += (int)allKeypoints[level].size();
-    if( nkeypoints == 0 )//表示没有提取到keypoints
+    if( nkeypoints == 0 )//表示所有金字塔层图片都没有提取到keypoints
         _descriptors.release();
     else
     {
+		//_OutputArray：：getMat（）之前一定要调用_OutputArray：：create（）为矩阵分配空间
         _descriptors.create(nkeypoints, 32, CV_8U); //descriptors就好似nkeypoints*32维的矩阵，矩阵里存着一个uchar，其单位为8bit
 													//这样对于每个关键点，就对应有32*8=256bit的二进制向量作为描述子
         descriptors = _descriptors.getMat(); //转换为Mat数据类型
@@ -1240,7 +1241,7 @@ void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPo
 		Mat D; A.copyTo(D); // D is a deep copy of A, like B
 		*/
 
-        GaussianBlur(workingMat, workingMat, Size(7, 7), 2, 2, BORDER_REFLECT_101);
+        GaussianBlur(workingMat, workingMat, Size(7, 7), 2, 2, BORDER_REFLECT_101);//为了让图片像素连续
 
         // Compute the descriptors 计算描述子
 		//计算描述子，其计算所需的点对分布采用的是高斯分布，储存在pattern里

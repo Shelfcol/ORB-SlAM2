@@ -66,7 +66,7 @@ int ORBmatcher::SearchByProjection(Frame &F, const vector<MapPoint*> &vpMapPoint
 
     const bool bFactor = th!=1.0;
 
-    for(size_t iMP=0; iMP<vpMapPoints.size(); iMP++)
+    for(size_t iMP=0; iMP<vpMapPoints.size(); iMP++)//遍历所有的mappoint
     {
         MapPoint* pMP = vpMapPoints[iMP];
 
@@ -490,7 +490,7 @@ int ORBmatcher::SearchForInitialization(Frame &F1, Frame &F2, vector<cv::Point2f
 
     vector<int> rotHist[HISTO_LENGTH];//HISTO_LENGTH=30
     for(int i=0;i<HISTO_LENGTH;i++)
-        rotHist[i].reserve(500);
+        rotHist[i].reserve(500);//预留空间，蛋size不变，后面添加数字需要push_back
     const float factor = HISTO_LENGTH/360.0f;
 
     vector<int> vMatchedDistance(F2.mvKeysUn.size(),INT_MAX);//初始化成长度为F2.mvKeysUn.size()，数值为INT_MAX的vector
@@ -501,39 +501,39 @@ int ORBmatcher::SearchForInitialization(Frame &F1, Frame &F2, vector<cv::Point2f
         cv::KeyPoint kp1 = F1.mvKeysUn[i1];
         int level1 = kp1.octave;//octave：代表是从金字塔哪一层提取的得到的数据。
 
-        if(level1>0)//？？？
+        if(level1>0)//只去level=0的原始图片得到的keypoints进行匹配，因为单目初始化使用的两帧图片相邻，则不需要用图像金字塔的其他层的关键点，图像金字塔是为了解决不同距离的两
             continue;
 
-        vector<size_t> vIndices2 = F2.GetFeaturesInArea(vbPrevMatched[i1].x,vbPrevMatched[i1].y, 
-			,level1,level1);
+		//在windowsize大小内进行特征点的匹配
+        vector<size_t> vIndices2 = F2.GetFeaturesInArea(vbPrevMatched[i1].x,vbPrevMatched[i1].y, windowSize,level1,level1);
 
         if(vIndices2.empty())
             continue;
 
         cv::Mat d1 = F1.mDescriptors.row(i1);
 
-        int bestDist = INT_MAX;
-        int bestDist2 = INT_MAX;
+        int bestDist = INT_MAX;//距离最近的
+        int bestDist2 = INT_MAX;//距离第二近的
         int bestIdx2 = -1;
 
         for(vector<size_t>::iterator vit=vIndices2.begin(); vit!=vIndices2.end(); vit++)
         {
             size_t i2 = *vit;
 
-            cv::Mat d2 = F2.mDescriptors.row(i2);
+            cv::Mat d2 = F2.mDescriptors.row(i2);//遍历vIndices的描述子
 
-            int dist = DescriptorDistance(d1,d2);
+            int dist = DescriptorDistance(d1,d2);//计算描述子之间的距离
 
-            if(vMatchedDistance[i2]<=dist)
+            if(vMatchedDistance[i2]<=dist)//这对的距离比记录的大，则不符合条件，舍弃
                 continue;
 
-            if(dist<bestDist)
+            if(dist<bestDist)//记录当前最近的距离，将上一次最好的设置为第二近的
             {
                 bestDist2=bestDist;
                 bestDist=dist;
                 bestIdx2=i2;
             }
-            else if(dist<bestDist2)
+            else if(dist<bestDist2)//比第二近的近，则更新第二近的
             {
                 bestDist2=dist;
             }

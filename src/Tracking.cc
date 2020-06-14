@@ -325,7 +325,7 @@ void Tracking::Track()
     // mState为tracking的状态机
     // SYSTME_NOT_READY, NO_IMAGE_YET, NOT_INITIALIZED, OK, LOST
     // 如果图像复位过、或者第一次运行，则为NO_IMAGE_YET状态
-    if(mState==NO_IMAGES_YET)//没有图片，则系统未初始化，则需要初始化
+    if(mState==NO_IMAGES_YET)//没有图片，则系统未初始化，则需要初始化，或者图片丢失了，就需要重新初始化
     {
         mState = NOT_INITIALIZED;
     }
@@ -743,12 +743,12 @@ void Tracking::MonocularInitialization()
             for(size_t i=0; i<mCurrentFrame.mvKeysUn.size(); i++)
                 mvbPrevMatched[i]=mCurrentFrame.mvKeysUn[i].pt;//把当前帧的去除畸变的关键点的坐标值存到mvbPrevMatched里面
 
-            // 这两句是多余的，因为还未创建mpInitializer，所以delete没有意义，但是下面767行 mpInitializer = static_cast<Initializer*>(NULL)初始化了一个空指针，是用来干啥的？？？？
+            // 这两句是多余的，因为还未创建mpInitializer，所以delete没有意义，但是下面767行 mpInitializer = static_cast<Initializer*>(NULL)是将指针彻底删除，免得出现野指针
             if(mpInitializer)
-                delete mpInitializer;
+                delete mpInitializer;//我们在删除一个指针之后，编译器只会释放该指针所指向的内存空间，而不会删除这个指针本身。delete *p之后一定要加上： p=NULL
 
             // 由当前帧构造初始器   (测量误差）sigma:1.0 RANSAC iterations:200
-            mpInitializer =  new Initializer(mCurrentFrame,1.0,200);//里面主要保存关键点和矫正参数矩阵
+            mpInitializer =  new Initializer(mCurrentFrame,1.0,200);//里面主要保存关键点和矫正参数矩阵，初始化单目initializer
 
             fill(mvIniMatches.begin(),mvIniMatches.end(),-1);//fill用于填充vector的，把mvIniMatches从begin到end都填上-1
 
@@ -763,10 +763,10 @@ void Tracking::MonocularInitialization()
         // 因此只有连续两帧的特征点个数都大于100时，才能继续进行初始化过程
         if((int)mCurrentFrame.mvKeys.size()<=100)
         {
-            delete mpInitializer;//单目用相邻两帧进行进行初始化
-            mpInitializer = static_cast<Initializer*>(NULL);//这里初始化一个Initializer的空指针变量mpInitializer
-															//这里是不是只是预先分配内存？？
-            fill(mvIniMatches.begin(),mvIniMatches.end(),-1);
+            delete mpInitializer;//单目用相邻两帧进行进行初始化，如果这一帧的关键点数量太少，则上一帧图像也不应该使用，则删除这个指针，并附为NULL，防止成为野指针
+            mpInitializer = static_cast<Initializer*>(NULL);//防止成为野指针
+															
+            fill(mvIniMatches.begin(),mvIniMatches.end(),-1);//表示没有匹配上
             return;
         }
 
