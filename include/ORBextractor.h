@@ -102,7 +102,7 @@ protected:
     int nfeatures;
     double scaleFactor;//每层之间的缩放比例，kitti里面是1.2
     int nlevels;
-    int iniThFAST; 提取FAST角点时初始阈值
+    int iniThFAST; //提取FAST角点时初始阈值
     int minThFAST;
 
     std::vector<int> mnFeaturesPerLevel;//每层的特征数量
