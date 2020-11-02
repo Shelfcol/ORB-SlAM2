@@ -20,11 +20,14 @@
 
 #ifndef ORBEXTRACTOR_H
 #define ORBEXTRACTOR_H
-
+#include <opencv2/opencv.hpp>
 #include <vector>
 #include <list>
-#include <opencv/cv.h>
-
+#include <ATen/ATen.h>
+#include <torch/torch.h>
+#include <torch/script.h> 
+#include <opencv2/features2d.hpp>
+#include <opencv2/xfeatures2d.hpp>
 
 namespace ORB_SLAM2
 {
@@ -56,9 +59,8 @@ public:
     // Compute the ORB features and descriptors on an image.
     // ORB are dispersed on the image using an octree.
     // Mask is ignored in the current implementation.
-    void operator()( cv::InputArray image, cv::InputArray mask,
-      std::vector<cv::KeyPoint>& keypoints,
-      cv::OutputArray descriptors);
+    void ExtractDesc( cv::InputArray _image, cv::InputArray _mask, std::vector<cv::KeyPoint>& _keypoints,
+                      cv::OutputArray _descriptors, bool use_orb);
 
     int inline GetLevels(){
         return nlevels;}
@@ -83,36 +85,35 @@ public:
     }
 
     std::vector<cv::Mat> mvImagePyramid;
+    
+    int nfeatures;
 
 protected:
-	//建立图像金字塔
-	//将原始图像一级级缩小并依次存在mvImagePyramid里
-    void ComputePyramid(cv::Mat image); 
-	//利用四叉树提取高斯金字塔中每层图像的orb关键点   
-    void ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> >& allKeypoints); 
-    //将关键点分配到四叉树，筛选关键点
-	std::vector<cv::KeyPoint> DistributeOctTree(const std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
+
+    void ComputePyramid(cv::Mat image);
+    void ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> >& allKeypoints);    
+    std::vector<cv::KeyPoint> DistributeOctTree(const std::vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
                                            const int &maxX, const int &minY, const int &maxY, const int &nFeatures, const int &level);
-	//作者遗留下的旧的orb关键点方法
+
     void ComputeKeyPointsOld(std::vector<std::vector<cv::KeyPoint> >& allKeypoints);
-	//存储关键点附近patch的点对相对位置
     std::vector<cv::Point> pattern;
-	
-	//这几个变量就是初始化的时候读取的摄像头的yaml配置文件得到的
-    int nfeatures;
-    double scaleFactor;//每层之间的缩放比例，kitti里面是1.2
+
+    
+    double scaleFactor;
     int nlevels;
-    int iniThFAST; //提取FAST角点时初始阈值
+    int iniThFAST;
     int minThFAST;
+    cv::Ptr<cv::Feature2D> f2d;////
+    std::vector<int> mnFeaturesPerLevel;
 
-    std::vector<int> mnFeaturesPerLevel;//每层的特征数量
+    std::vector<int> umax;
 
-    std::vector<int> umax;//描述Patch圆直径为PATCH_SIZE时一圈离散点的坐标。下标代表v方向的坐标，下标对应的值代表u方向的坐标
-
-    std::vector<float> mvScaleFactor;//每层的相对于原始图像的缩放比例,第0个为1，第二个为1.2（kitti）
-    std::vector<float> mvInvScaleFactor;//mvScaleFactor的倒数    
-    std::vector<float> mvLevelSigma2;//mvScaleFactor的平方
-    std::vector<float> mvInvLevelSigma2;//mvScaleFactor的平方的倒数
+    std::vector<float> mvScaleFactor;
+    std::vector<float> mvInvScaleFactor;    
+    std::vector<float> mvLevelSigma2;
+    std::vector<float> mvInvLevelSigma2;
+    torch::jit::script::Module module;
+    cv::Ptr<cv::DescriptorExtractor> extractor_;
 };
 
 } //namespace ORB_SLAM

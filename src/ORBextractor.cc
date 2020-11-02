@@ -53,19 +53,19 @@
 *
 */
 
-//https://blog.csdn.net/liu502617169/article/details/89423494
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <vector>
-#include <iterator>
 
 #include "ORBextractor.h"
+
 #include <iostream>
-
-
+#include <torch/torch.h>
+#include <torch/script.h> 
+#include <ros/ros.h>
 using namespace cv;
 using namespace std;
 
@@ -76,13 +76,12 @@ const int PATCH_SIZE = 31;
 const int HALF_PATCH_SIZE = 15;
 const int EDGE_THRESHOLD = 19;
 
-//根据公式计算特征点方向
+
 static float IC_Angle(const Mat& image, Point2f pt,  const vector<int> & u_max)
 {
-
     int m_01 = 0, m_10 = 0;
 
-    const uchar* center = &image.at<uchar> (cvRound(pt.y), cvRound(pt.x));//image.at<uchar>(i,j)：取出灰度图像中i行j列的点。
+    const uchar* center = &image.at<uchar> (cvRound(pt.y), cvRound(pt.x));
 
     // Treat the center line differently, v=0
     for (int u = -HALF_PATCH_SIZE; u <= HALF_PATCH_SIZE; ++u)
@@ -103,7 +102,7 @@ static float IC_Angle(const Mat& image, Point2f pt,  const vector<int> & u_max)
         }
         m_01 += v * v_sum;
     }
-	//fastAtan2(y,x)函数得出的角度是以X轴正方向为0°方向，然后角度确定按照逆时针方向，以360°为终点，角度范围0°- 360°
+
     return fastAtan2((float)m_01, (float)m_10);
 }
 
@@ -113,18 +112,17 @@ static void computeOrbDescriptor(const KeyPoint& kpt,
                                  const Mat& img, const Point* pattern,
                                  uchar* desc)
 {
-    float angle = (float)kpt.angle*factorPI;//转为弧度制
-	//考虑关键点的方向
+    float angle = (float)kpt.angle*factorPI;
     float a = (float)cos(angle), b = (float)sin(angle);
 
-    const uchar* center = &img.at<uchar>(cvRound(kpt.pt.y), cvRound(kpt.pt.x));//先y后x
+    const uchar* center = &img.at<uchar>(cvRound(kpt.pt.y), cvRound(kpt.pt.x));
     const int step = (int)img.step;
-	//注意这里在pattern里找点的时候，是利用关键点的方向信息进行了旋转矫正的。获取图片的某个像素
+
     #define GET_VALUE(idx) \
         center[cvRound(pattern[idx].x*b + pattern[idx].y*a)*step + \
                cvRound(pattern[idx].x*a - pattern[idx].y*b)]
 
-	//desc是32个uchar的数组，即含有256个二进制
+
     for (int i = 0; i < 32; ++i, pattern += 16)
     {
         int t0, t1, val;
@@ -151,10 +149,37 @@ static void computeOrbDescriptor(const KeyPoint& kpt,
     #undef GET_VALUE
 }
 
-//ORB算法计算描述子时需要使用到一个提前计算好的查找表
-//这个查找表对应的是0度，当特征点不是0度时，需要将查找表中的座标进行旋转，这部分代码在OpenCV中有。再看论文中，作者将查找表以12°
-//步进的方式生成了30个离散的查找表，这样计算时就能够快速选定座标位置。
-//512个坐标点，对应256对像素点，最后生成256个bit的描述子
+
+
+
+//////////////////
+/////////////////
+static void computesiftDescriptor(const KeyPoint& kpt,
+                                 const Mat& img, const Point* pattern,
+                                 float* desc , torch::jit::script::Module* module)
+{
+	int width = img.cols;
+	int height = img.rows;
+	int x = cvRound(kpt.pt.x);
+	int y = cvRound(kpt.pt.y);
+
+	if( x-16 > 0 && x + 16 <width && y - 16>0 && y+16 <height )
+	{
+		Mat patch = img(Rect(x-16,y - 16 ,32,32)); //// x  ,  y  ,  width  ,  height
+		cv::Mat img_float;
+		patch.convertTo(img_float, CV_32F, 1.0 / 255);
+		std::vector<torch::jit::IValue> inputs;
+		auto img_tensor = torch::from_blob(img_float.data, {1,32, 32, 1}).permute({0, 3, 1, 2});
+		inputs.push_back(img_tensor.to(torch::kCUDA));
+		ros::Time begin = ros::Time::now();
+		at::Tensor output = module->forward(inputs).toTensor();
+		output=output.to(torch::kCPU);
+		memcpy(desc,output.data_ptr(),128 * sizeof(float));
+		ros::Time end1 = ros::Time::now();
+	}
+}
+
+
 static int bit_pattern_31_[256*4] =
 {
     8,-3, 9,5/*mean (0), correlation (0)*/,
@@ -414,106 +439,68 @@ static int bit_pattern_31_[256*4] =
     7,0, 12,-2/*mean (0.127002), correlation (0.537452)*/,
     -1,-6, 0,-11/*mean (0.127148), correlation (0.547401)*/
 };
+ 
+/*
+1: scaleFactor是tracking 文件给的  在bash文件里面配置  目前配置的1.2
+2: nfeatures是tracking 文件给的  在bash文件里面配置  目前配置的2000
 
-//提取Oorb前的准备工作，构造函数
+*/
+
+
 ORBextractor::ORBextractor(int _nfeatures, float _scaleFactor, int _nlevels,
          int _iniThFAST, int _minThFAST):
     nfeatures(_nfeatures), scaleFactor(_scaleFactor), nlevels(_nlevels),
     iniThFAST(_iniThFAST), minThFAST(_minThFAST)
 {
-    // nfeatures：期望提取的特征点个数
-    // nlevels：金字塔层数
-    // scaleFactor：相邻两层金字塔之间的相对尺度因子，大于1，金字塔越往上的图像每个像素代表的范围越大
-    // mvScaleFactor：累乘得到每一层相对第一层的尺度因子
-    // mvLevelSigma2：尺度因子mvScaleFactor的平方
-    // mvInvScaleFactor：尺度因子mvScaleFactor的逆，即为倒数
-    // mvInvLevelSigma2：尺度因子平方mvLevelSigma2的逆，即为倒数
-    // mnFeaturesPerLevel：记录每一层期望提取的特征点个数
-    // iniThFAST：提取fast特征点的默认阈值
-    // minThFAST：如果使用iniThFAST默认阈值提取不到特征点则使用最小阈值再次提取
-
-    mvScaleFactor.resize(nlevels);//初始化vector的长度
-    mvLevelSigma2.resize(nlevels);//上式平方
+    module = torch::jit::load("/home/mataiyuan/visual_map/model/mine/bestmodel_c.pt");
+    module.to(at::kCUDA);
+    f2d = xfeatures2d::SIFT::create();
+    mvScaleFactor.resize(nlevels);
+    mvLevelSigma2.resize(nlevels);
     mvScaleFactor[0]=1.0f;
     mvLevelSigma2[0]=1.0f;
     for(int i=1; i<nlevels; i++)
     {
         mvScaleFactor[i]=mvScaleFactor[i-1]*scaleFactor;
-        mvLevelSigma2[i]=mvScaleFactor[i]*mvScaleFactor[i];//平方关系
+        mvLevelSigma2[i]=mvScaleFactor[i]*mvScaleFactor[i];
     }
 
-    mvInvScaleFactor.resize(nlevels);//倒数关系
-    mvInvLevelSigma2.resize(nlevels);//倒数
+    mvInvScaleFactor.resize(nlevels);
+    mvInvLevelSigma2.resize(nlevels);
     for(int i=0; i<nlevels; i++)
     {
         mvInvScaleFactor[i]=1.0f/mvScaleFactor[i];
         mvInvLevelSigma2[i]=1.0f/mvLevelSigma2[i];
+
     }
 
     mvImagePyramid.resize(nlevels);
-	//对于缩放的每层高斯金字塔图像，计算其对应每层待提取特征的数量放入mnFeaturesPerLevel中，使得每层特征点的数列成等比数列数列递减
     mnFeaturesPerLevel.resize(nlevels);
     float factor = 1.0f / scaleFactor;
-    //总共期望提取nfeatures个特征点，根据尺度因子等比数列，计算出金字塔最底层期望提取的特征点个数，底层特征点最多
-    float nDesiredFeaturesPerScale = nfeatures*(1 - factor)/(1 - (float)pow((double)factor, (double)nlevels));//factor=5/6,nlevels=8时为0.217
+    float nDesiredFeaturesPerScale = nfeatures*(1 - factor)/(1 - (float)pow((double)factor, (double)nlevels));
 
-    // 根据尺度因子计算金字塔每一层期望提取的特征点个数（越往上提取的特征点个数越少）
-    int sumFeatures = 0;//保存前面nlevels-1层的期望特征点总数
-    for( int level = 0; level < nlevels-1; level++ )
+    int sumFeatures = 0;
+    for( int level = 0; level < nlevels-1; level++ ) /////a1求出来之后，剩下的就是依次乘以公比factor
     {
-		//0层的features数量最多，等比数列递减
-        mnFeaturesPerLevel[level] = cvRound(nDesiredFeaturesPerScale);//四舍五入 cvFloor() cvCeil()
-		
-		std::cout << "nDesiredFeaturesPerScale= " << nDesiredFeaturesPerScale << " ";
+        mnFeaturesPerLevel[level] = cvRound(nDesiredFeaturesPerScale);
         sumFeatures += mnFeaturesPerLevel[level];
-        nDesiredFeaturesPerScale *= factor;//factor<1，所以第0层是最多特征点的
+        nDesiredFeaturesPerScale *= factor;
+        
     }
-	std::cout << "ORBextractor.cc 460" << std::endl;
-	std::cout << "sumFeatures 0.9386 =" << sumFeatures << std::endl;
-    mnFeaturesPerLevel[nlevels-1] = std::max(nfeatures - sumFeatures, 0);//nlevels层的特征点数为未达到nfeatures数量的部分
-	//保证整个图像金字塔最后提取的特征点总数为nfeatures
-
-	//准备计算关键点keypoint的brief描述子时所需要的pattern
-	//这个pattern一共有512个点对；得到的就是256个二进制数字
+    mnFeaturesPerLevel[nlevels-1] = std::max(nfeatures - sumFeatures, 0);///最后一层这样处理比较合适
     const int npoints = 512;
+    const Point* pattern0 = (const Point*)bit_pattern_31_;
+    std::copy(pattern0, pattern0 + npoints, std::back_inserter(pattern));
 
-	//bit_pattern_31_是一个1024维的数组，其信息是512对点对的相对中心点的像素坐标
-	//ORB算法计算描述子时需要使用到一个提前计算好的查找表
-	//这个查找表对应的是0度，当特征点不是0度时，需要将查找表中的座标进行旋转，这部分代码在OpenCV中有。再看论文中，作者将查找表以12°
-	// 步进的方式生成了30个离散的查找表，这样计算时就能够快速选定座标位置。
-    //这里将bit_pattern_31_里的信息以Point的形式存储在了std::vector<cv::Point> pattern里;
-    //最后pattern储存了512个Point
-    const Point* pattern0 = (const Point*)bit_pattern_31_;// 源代码中这里保存的就是论文《ORB an efficient alternative to SIFT or SURF》中计算得到的匹配对的x/y坐标，一共256对
+    umax.resize(HALF_PATCH_SIZE + 1);
 
-	//fist [IN]: 要拷贝元素的首地址
-	//last [IN]:要拷贝元素的最后一个元素的下一个地址
-	//x [OUT] : 拷贝的目的地的首地址
-    std::copy(pattern0, pattern0 + npoints, std::back_inserter(pattern));//back_inserter(container)：使用push_back()在容器尾端安插元素，元素排列顺序和安插顺序相同
-
-    //This is for orientation
-    // pre-compute the end of a row in a circular patch
-	//这里是为了计算关键点方向的准备工作
-	//我们是要在以关键点keypoint像素坐标点为中心的直径为PATCH_SIZE，半径为HALF_PATCH_SIZE的patch圆内计算关键点keypoint的方向。
-	//那如何描述这个patch圆的范围呢？这里选择的是储存不同v所对应的的umax来描述这个patch圆的范围。
-
-	//const int PATCH_SIZE = 31; HALF_PATCH_SIZE（半径） = 15;  EDGE_THRESHOLD = 19;
-
-	// 将v坐标划分为两部分进行计算，主要为了确保计算特征主方向的时候，x,y方向对称
-	//cvFloor是取不大于参数的最大整数值
-    umax.resize(HALF_PATCH_SIZE + 1);//下标代表v方向的坐标，下标对应的值代表u方向的坐标
-
-    int v, v0, vmax = cvFloor(HALF_PATCH_SIZE * sqrt(2.f) / 2 + 1);//下取整 11
-    int vmin = cvCeil(HALF_PATCH_SIZE * sqrt(2.f) / 2);//上取整，勾股定理计算 11
-    const double hp2 = HALF_PATCH_SIZE*HALF_PATCH_SIZE;//r²
-
-	//V坐标的第一部分，v <= vmax，勾股定理
-	//https://blog.csdn.net/liu502617169/article/details/89423494   3.1.1
+    int v, v0, vmax = cvFloor(HALF_PATCH_SIZE * sqrt(2.f) / 2 + 1);
+    int vmin = cvCeil(HALF_PATCH_SIZE * sqrt(2.f) / 2);
+    const double hp2 = HALF_PATCH_SIZE*HALF_PATCH_SIZE;
     for (v = 0; v <= vmax; ++v)
         umax[v] = cvRound(sqrt(hp2 - v * v));
 
-    // Make sure we are symmetric，为了确保计算特征主方向的时候，x,y方向对称。圆的对称性计算余下的umax[v]
-	//其实是算当v=vmax至HALF_PATCH_SIZE时的umax[v]
-	// V坐标的第二部分
+    // Make sure we are symmetric
     for (v = HALF_PATCH_SIZE, v0 = 0; v >= vmin; --v)
     {
         while (umax[v0] == umax[v0 + 1])
@@ -521,9 +508,11 @@ ORBextractor::ORBextractor(int _nfeatures, float _scaleFactor, int _nlevels,
         umax[v] = v0;
         ++v0;
     }
+    
+    //
+    extractor_ = cv::xfeatures2d::FREAK::create(false, true, 22, 1);
 }
 
-//特征点的方向计算，书p138的公式
 static void computeOrientation(const Mat& image, vector<KeyPoint>& keypoints, const vector<int>& umax)
 {
     for (vector<KeyPoint>::iterator keypoint = keypoints.begin(),
@@ -532,6 +521,8 @@ static void computeOrientation(const Mat& image, vector<KeyPoint>& keypoints, co
         keypoint->angle = IC_Angle(image, keypoint->pt, umax);
     }
 }
+
+
 
 void ExtractorNode::DivideNode(ExtractorNode &n1, ExtractorNode &n2, ExtractorNode &n3, ExtractorNode &n4)
 {
@@ -590,34 +581,26 @@ void ExtractorNode::DivideNode(ExtractorNode &n1, ExtractorNode &n2, ExtractorNo
         n4.bNoMore = true;
 
 }
-//利用四叉树来筛选提取的特征点，使得筛选后的特征点数量在预计的范围，并且分布均匀
+
 vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>& vToDistributeKeys, const int &minX,
                                        const int &maxX, const int &minY, const int &maxY, const int &N, const int &level)
 {
-    // Compute how many initial nodes
-    // 图像大小一般为矩形，且宽高比不是整数，
+    // Compute how many initial nodes   
     const int nIni = round(static_cast<float>(maxX-minX)/(maxY-minY));
 
-    // note：如果图像的宽不到高的一半，hX=0，会出问题，据此推断，这里默认为图像宽大于高的情况
     const float hX = static_cast<float>(maxX-minX)/nIni;
 
-    // lNodes用于存放节点数据，note：只保留叶子节点
-    // ExtractorNode中UL、UR、BL、BR记录了该节点（区域）的四个顶点坐标
-    // ExtractorNode中的vKeys记录了属于该节点（区域）的所有特征点，这里有些低效，容器里存的是特征点而不是特征点的指针
     list<ExtractorNode> lNodes;
 
-    // 记录初始节点的指针，为了方便根据特征点x坐标快速找到对应的节点（x/hX）
     vector<ExtractorNode*> vpIniNodes;
     vpIniNodes.resize(nIni);
 
-    // step1: 建立分裂的初始节点
-    // step1.1：确定节点区域
     for(int i=0; i<nIni; i++)
     {
         ExtractorNode ni;
         ni.UL = cv::Point2i(hX*static_cast<float>(i),0);
         ni.UR = cv::Point2i(hX*static_cast<float>(i+1),0);
-        ni.BL = cv::Point2i(ni.UL.x,maxY-minY); // wubo，为什么要减去minY
+        ni.BL = cv::Point2i(ni.UL.x,maxY-minY);
         ni.BR = cv::Point2i(ni.UR.x,maxY-minY);
         ni.vKeys.reserve(vToDistributeKeys.size());
 
@@ -625,8 +608,7 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
         vpIniNodes[i] = &lNodes.back();
     }
 
-    // Associate points to childs
-    // step1.2：将所有特征点关联到对应的节点（区域）
+    //Associate points to childs
     for(size_t i=0;i<vToDistributeKeys.size();i++)
     {
         const cv::KeyPoint &kp = vToDistributeKeys[i];
@@ -637,12 +619,12 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
 
     while(lit!=lNodes.end())
     {
-        if(lit->vKeys.size()==1)    // 如果这个区域只有一个特征点，则不用再构建子树
+        if(lit->vKeys.size()==1)
         {
             lit->bNoMore=true;
             lit++;
         }
-        else if(lit->vKeys.empty()) // 如果这个区域一个特征点都没有，则删除该空节点
+        else if(lit->vKeys.empty())
             lit = lNodes.erase(lit);
         else
             lit++;
@@ -655,7 +637,6 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
     vector<pair<int,ExtractorNode*> > vSizeAndPointerToNode;
     vSizeAndPointerToNode.reserve(lNodes.size()*4);
 
-    // 利用四叉树方法对图像进行划分区域
     while(!bFinish)
     {
         iteration++;
@@ -668,7 +649,6 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
 
         vSizeAndPointerToNode.clear();
 
-        // step2：广度搜索的方式遍历所有节点，将目前的子区域进行划分
         while(lit!=lNodes.end())
         {
             if(lit->bNoMore)
@@ -680,23 +660,17 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
             else
             {
                 // If more than one point, subdivide
-                // 如果这个区域不止一个特征点，则进一步细分成四个子区域
                 ExtractorNode n1,n2,n3,n4;
                 lit->DivideNode(n1,n2,n3,n4);
 
                 // Add childs if they contain points
-                // 如果子节点中包含特征点，则将该节点添加到节点链表中
                 if(n1.vKeys.size()>0)
                 {
-                    // note：将新分裂出的节点插入到容器前面，迭代器后面的都是上一次分裂还未访问的节点
-                    lNodes.push_front(n1);
-                    // 如果该节点中包含的特征点超过1，则该节点将会继续扩展子节点，使用nToExpand统计接下来要扩展的节点数
+                    lNodes.push_front(n1);                    
                     if(n1.vKeys.size()>1)
                     {
                         nToExpand++;
-                        // 按照 pair<节点中特征点个数，节点索引> 建立索引，后续通过排序快速筛选出包含特征点个数比较多的节点
                         vSizeAndPointerToNode.push_back(make_pair(n1.vKeys.size(),&lNodes.front()));
-                        // 记录节点自己的迭代器指针
                         lNodes.front().lit = lNodes.begin();
                     }
                 }
@@ -731,29 +705,28 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
                     }
                 }
 
-                // 该节点已经分裂完，删除该节点
                 lit=lNodes.erase(lit);
                 continue;
             }
         }       
 
-        // step3：Node数快接近要求数目时，优先对包含特征点比较多的区域进行划分
         // Finish if there are more nodes than required features
         // or all nodes contain just one point
         if((int)lNodes.size()>=N || (int)lNodes.size()==prevSize)
         {
             bFinish = true;
         }
-        else if(((int)lNodes.size()+nToExpand*3)>N)     // 当再划分之后所有的Node数快接近要求数目时，优先对包含特征点比较多的区域进行划分
+        else if(((int)lNodes.size()+nToExpand*3)>N)
         {
+
             while(!bFinish)
             {
+
                 prevSize = lNodes.size();
 
                 vector<pair<int,ExtractorNode*> > vPrevSizeAndPointerToNode = vSizeAndPointerToNode;
                 vSizeAndPointerToNode.clear();
 
-                // 对需要划分的部分进行排序, 即对兴趣点数较多的区域进行划分
                 sort(vPrevSizeAndPointerToNode.begin(),vPrevSizeAndPointerToNode.end());
                 for(int j=vPrevSizeAndPointerToNode.size()-1;j>=0;j--)
                 {
@@ -812,7 +785,6 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
     }
 
     // Retain the best point in each node
-    // step4：保留每个区域响应值最大的一个兴趣点
     vector<cv::KeyPoint> vResultKeys;
     vResultKeys.reserve(nfeatures);
     for(list<ExtractorNode>::iterator lit=lNodes.begin(); lit!=lNodes.end(); lit++)
@@ -836,147 +808,99 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
     return vResultKeys;
 }
 
-
-/*
-最开始我以为提取出来的关键点是以四叉树的形式储存的，结果不是。四叉树只是被利用使得提取的关键点均匀分布，并且用到了非极大值抑制(Non - maximum suppression, NMS)算法。
-
-该算法的具体步骤为：
-1.先是计算提取关键点的边界，太边缘的地方放弃提取关键点；
-2.将图像分割为W*W的小图片，遍历这些分割出来的小图片并提取其关键点；
-3.将提取的关键点交给DistributeOctTree()利用四叉树以及非极大值抑制算法进行筛选；
-4.计算关键点的相关信息：像素位置，patch尺度，方向，所在高斯金字塔层数；
-
-ps注意在分割图片的时候，小窗之间是有重叠的。
-*/
-
-//利用四叉树提取高斯金字塔中每层图像的orb关键点
 void ORBextractor::ComputeKeyPointsOctTree(vector<vector<KeyPoint> >& allKeypoints)
 {
     allKeypoints.resize(nlevels);
 
     const float W = 30;
 
-    // 对金字塔每一层图像提取特征点
     for (int level = 0; level < nlevels; ++level)
     {
-		//计算边界，在这个边界内计算FAST关键点，原图像四个方向边界需要减去16，因为HALF_PATCH_SIZE=15
-        const int minBorderX = EDGE_THRESHOLD-3;//16，因为HALF_PATCH_SIZE=15
+
+        const int minBorderX = EDGE_THRESHOLD-3;
         const int minBorderY = minBorderX;
-        const int maxBorderX = mvImagePyramid[level].cols-(EDGE_THRESHOLD-3);
+        const int maxBorderX = mvImagePyramid[level].cols-EDGE_THRESHOLD+3;
         const int maxBorderY = mvImagePyramid[level].rows-EDGE_THRESHOLD+3;
 
-		//用这个存储每层金字塔待筛选的orb
         vector<cv::KeyPoint> vToDistributeKeys;
         vToDistributeKeys.reserve(nfeatures*10);
 
-		//计算边界宽度和高度
         const float width = (maxBorderX-minBorderX);
         const float height = (maxBorderY-minBorderY);
 
-        // 每个区域块的大小为W，将图像划分为（nRows*nCols）个区域，在无法取整的情况下，调整每个区域大小为（wCell*hCell）
-		//将原始图片分割的行数和列数
         const int nCols = width/W;
         const int nRows = height/W;
-		////实际分割窗口的大小(宽高)
-        const int wCell = ceil(width/nCols);//有可能不等于W，前面减去16估计就是考虑这个问题。每一个图像块的实际宽度
-        const int hCell = ceil(height/nRows);//每一个图像块的实际高度
-		//分块的原因：
-        //如果直接对整张图进行特征点检测，则对检测结果判断每个区域内是否有特征点会比较麻烦，并且用阈值限制的fast角点可能分布不均匀，有可能扎堆，分块就可以限制每块的fast角点，也不至于某块很密集，某块没多少点
-		//因此这里按照一个区域一个区域的方式检测特征点
-        // 按区域提取特征点---> vToDistributeKeys
-
-		//使用两个for循环遍历每个窗口，首先先计算窗口的四个坐标
-		//遍历每行
+        const int wCell = ceil(width/nCols);
+        const int hCell = ceil(height/nRows);
         for(int i=0; i<nRows; i++)
         {
-            // 计算每个块的Y方向上起始和终止区域（iniY，maxY）
             const float iniY =minBorderY+i*hCell;
-            float maxY = iniY+hCell+6;//这里注意窗口之间有6行的重叠
+            float maxY = iniY+hCell+6;
 
-            if(iniY>=maxBorderY-3)//窗口的行上坐标超出边界，则放弃此行。这里-3，下面-6？？？
+            if(iniY>=maxBorderY-3)
                 continue;
-            if(maxY>maxBorderY)//窗口的行下坐标超出边界，则将窗口的行下坐标设置为边界
+            if(maxY>maxBorderY)
                 maxY = maxBorderY;
 
-			//遍历每列
             for(int j=0; j<nCols; j++)
             {
-                // 计算每个块的X方向上起始和终止区域（iniX，maxX）
                 const float iniX =minBorderX+j*wCell;
-                float maxX = iniX+wCell+6;//6列重叠
-                if(iniX>=maxBorderX-6)//maxBorderX已经是原来的边界减了16的，所以不用担心像素坐标越界
+                float maxX = iniX+wCell+6;
+                if(iniX>=maxBorderX-6)
                     continue;
                 if(maxX>maxBorderX)
                     maxX = maxBorderX;
 
-                // opencv/modules/features2d/src/fast.cpp
-                // 在（iniX, iniY）(maxX, maxY)范围内提取FAST关键点, 并开启非极大值抑制（防止在一个很小的区域内提取过多的特征点）
-				//提取FAST角点
-				//输入参数
-				//mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX) level层的图片中行范围(iniY,maxY),列范围(iniX,maxX)的截图
-				//vKeysCell，储存提取的fast关键点
-				//iniThFAST提取角点的阈值,即周围像素的灰度值与中心像素的灰度值之差
-				//true 是否开启非极大值抑制算法
-				
                 vector<cv::KeyPoint> vKeysCell;
-                FAST(mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX),
-                     vKeysCell,iniThFAST,true);
 
-                // 如果使用iniThFAST默认阈值提取不到特征点则使用最小阈值minThFAST再次提取
-                if(vKeysCell.empty())
+                FAST(mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX),
+                     vKeysCell,iniThFAST,true);	
+
+                if(vKeysCell.empty())//////若该区域未提取到特征点，降低阈值再进行一次
                 {
                     FAST(mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX),
                          vKeysCell,minThFAST,true);
+					//f2d->detect(mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX), vKeysCell);	
                 }
 
-				//如果找到的点不为空，就加入到vToDistributeKeys
                 if(!vKeysCell.empty())
                 {
                     for(vector<cv::KeyPoint>::iterator vit=vKeysCell.begin(); vit!=vKeysCell.end();vit++)
                     {
-						//根据前面的行列计算实际的位置
                         (*vit).pt.x+=j*wCell;
                         (*vit).pt.y+=i*hCell;
-                        vToDistributeKeys.push_back(*vit);//vToDistributeKeys保存每层金字塔的FAST点
+                        vToDistributeKeys.push_back(*vit);/////这里存入的只是对应于该层的特征点的位置
                     }
                 }
 
             }
         }
-		//经DistributeOctTree筛选后的关键点存储在这里
-        vector<KeyPoint> & keypoints = allKeypoints[level];//vector<vector<KeyPoint> >& allKeypoints，某个level的关键点
-        keypoints.reserve(nfeatures);
-		//vector 的reserve增加了vector的capacity，但是它的size没有改变，所以新元素调用push_back/insert！
-		//而resize改变了vector的capacity同时也增加了它的size，当加入新的元素时，用operator[]操作符，或者用迭代器来引用元素对象。此时再调用push_back()函数，是加在这个新的空间后面的。！
-		
 
-        // 根据mnFeaturesPerLevel，即该层的兴趣点数,对超过mnFeaturesPerLevel特征点进行剔除
+        vector<KeyPoint> & keypoints = allKeypoints[level];
+        keypoints.reserve(nfeatures);
+		//4叉树分配 使得特征点在图像中分布均匀
         keypoints = DistributeOctTree(vToDistributeKeys, minBorderX, maxBorderX,
                                       minBorderY, maxBorderY,mnFeaturesPerLevel[level], level);
-
-		//计算在本层提取出的关键点对应的Patch大小，称为scaledPatchSize
-		//你想想，本层的图像是缩小的，而你在本层提取的orb特征点，计算orb的方向，描述子的时候根据的PATCH大小依旧是PATCH_SIZE。
-		//而你在本层提取的orb是要恢复到原始图像上去的，所以其特征点的size（代表特征点的尺度信息）需要放大。
 
         const int scaledPatchSize = PATCH_SIZE*mvScaleFactor[level];
 
         // Add border to coordinates and scale information
+		 // 得到特征点在图中的真实坐标（keypoints中记录的是许多特征点在每一块小区域中的相对位置）
         const int nkps = keypoints.size();
         for(int i=0; i<nkps ; i++)
         {
-            keypoints[i].pt.x+=minBorderX;//因为每块都+minBorderX之后计算的关键点位置
+            keypoints[i].pt.x+=minBorderX;
             keypoints[i].pt.y+=minBorderY;
             keypoints[i].octave=level;
-            keypoints[i].size = scaledPatchSize;//特征点的size需要放大
+            keypoints[i].size = scaledPatchSize;
         }
     }
 
-    // compute orientations，根据书上的公式，计算特征点方向
+    // compute orientations
     for (int level = 0; level < nlevels; ++level)
         computeOrientation(mvImagePyramid[level], allKeypoints[level], umax);
 }
 
-//这个函数这次没用
 void ORBextractor::ComputeKeyPointsOld(std::vector<std::vector<KeyPoint> > &allKeypoints)
 {
     allKeypoints.resize(nlevels);
@@ -1159,169 +1083,229 @@ void ORBextractor::ComputeKeyPointsOld(std::vector<std::vector<KeyPoint> > &allK
 static void computeDescriptors(const Mat& image, vector<KeyPoint>& keypoints, Mat& descriptors,
                                const vector<Point>& pattern)
 {
-    descriptors = Mat::zeros((int)keypoints.size(), 32, CV_8UC1);//行，列，数据类型
+    descriptors = Mat::zeros((int)keypoints.size(), 32, CV_8UC1);
 
     for (size_t i = 0; i < keypoints.size(); i++)
         computeOrbDescriptor(keypoints[i], image, &pattern[0], descriptors.ptr((int)i));
 }
 
-//重载()
-//InputArray这个接口类可以是Mat、Mat_<T>、Mat_<T, m, n>、vector<T>、vector<vector<T>>、vector<Mat>。
-//也就意味着当你看refman或者源代码时，如果看见函数的参数类型是InputArray型时，把上诉几种类型作为参数都是可以的。
-//有时候InputArray输入的矩阵是个空参数，你只需要用cv::noArray()作为参数即可，或者很多代码里都用cv::Mat()作为空参
-// 这里的_mask就是一个空参
-/*
-1.对于输入的图片，计算其图像金字塔；
-2.提取图像金字塔中各层图像的关键点；
-3.计算提取出的关键点对应的描述子.
-4.将各个金字塔图层计算得到的关键点的坐标恢复到原图中
-*/
-void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPoint>& _keypoints,
-                      OutputArray _descriptors)
+
+
+
+
+
+static void computeSIFTDescriptors(const Mat& image, vector<KeyPoint>& keypoints, Mat& descriptors,
+                               const vector<Point>& pattern , torch::jit::script::Module *module)
+{
+
+	ros::Time begin = ros::Time::now();
+	cv::Mat img_float ;
+	int turn = 1;
+	int width = image.cols;
+	int height = image.rows;
+
+    for (size_t i = 0; i < keypoints.size(); i++)
+	{
+			int x = cvRound(keypoints[i].pt.x);
+			int y = cvRound(keypoints[i].pt.y);
+			if( x-16 > 0 && x + 16 <width && y - 16>0 && y+16 <height )
+			{
+				Mat patch = image(Rect(x-16,y - 16 ,32,32)); //// x  ,  y  ,  width  ,  height
+				if(turn==1){ img_float = patch ; }//还不能用vconcat
+				else
+				{
+					vconcat(img_float , patch , img_float);//将前面两个矩阵垂直叠起来，输出到第三个参数					
+				}
+				turn++;
+			}
+
+	}
+	turn--;//因为初始值为1，所以这里要减1才是真正的patch数量
+
+	img_float.convertTo(img_float, CV_32F, 1.0 / 255);
+	std::vector<torch::jit::IValue> inputs;
+	auto img_tensor = torch::from_blob(img_float.data, {turn ,32, 32, 1}).permute({0, 3, 1, 2});//将img_float.data叠成{turn ,32, 32, 1}的矩阵
+																								//permute，tensor维度换位，这里换成{turn,1,32,32}
+	inputs.push_back(img_tensor.to(torch::kCUDA));
+	at::Tensor output = module->forward(inputs).toTensor();
+	output=output.to(torch::kCPU);
+	memcpy(descriptors.data,output.data_ptr(),(turn) *256 * sizeof(float));//将outpuu中的数字复制给descriptors
+
+	
+
+}
+
+inline int bainaryDesc(float x) return (x > 0.0) ? 1 : 0;
+	
+static void computeBASDfromASD(const Mat &ASD, Mat& BASD)//将256的ASD转换成ASD
+{
+	for (size_t i = 0; i < ASD.size(); i++)
+	{
+		cv::Mat taf;
+		vector<float> desA_;
+		ASD[i].convertTo(taf, CV_64F);
+		desA_ = (vector<float>)taf.reshape(1, 1);
+		for (int j = 0, k = 0; j < 256; j += 8, ++k)
+		{
+			int val, t;
+			t = bainaryDesc(desA_[j]);
+			val = t;
+
+			t = bainaryDesc(desA_[j + 1]);
+			val |= (t) << 1;
+			t = bainaryDesc(desA_[j + 2]);
+			val |= (t) << 2;
+			t = bainaryDesc(desA_[j + 3]);
+			val |= (t) << 3;
+			t = bainaryDesc(desA_[j + 4]);
+			val |= (t) << 4;
+			t = bainaryDesc(desA_[j + 5]);
+			val |= (t) << 5;
+			t = bainaryDesc(desA_[j + 6]);
+			val |= (t) << 6;
+			t = bainaryDesc(desA_[j + 7]);
+			val |= (t) << 7;
+			BASD.ptr((int)i)[k] = (uchar)val;
+		}
+	}
+}
+
+void ORBextractor::ExtractDesc( InputArray _image, InputArray _mask, vector<KeyPoint>& _keypoints,
+                      OutputArray _descriptors, bool use_orb)
 { 
     if(_image.empty())
         return;
 
-    Mat image = _image.getMat();//将传入的参数转换为Mat的结构
-    assert(image.type() == CV_8UC1 );//CV_8UC1，unsigned 8位，1通道
-	//assert 的作用是现计算表达式 expression ，如果其值为假（即为0），那么它先向 stderr 打印一条出错信息,然后通过
-	//调用 abort 来终止程序运行。使用 assert 的缺点是，频繁的调用会极大的影响程序的性能，增加额外的开销
+    Mat image = _image.getMat();
+    assert(image.type() == CV_8UC1 );
 
     // Pre-compute the scale pyramid
-    // 构建图像金字塔（并包含边界EDGE_THRESHOLD）
-	//建立图像金字塔
-	//将原始图像一级级缩小并依次存在mvImagePyramid里
-    ComputePyramid(image);
+    ComputePyramid(image);///////计算图像金字塔
 
-    // 计算每层图像的兴趣点
-    vector < vector<KeyPoint> > allKeypoints; // vector<vector<KeyPoint>>
-    ComputeKeyPointsOctTree(allKeypoints);
+    vector < vector<KeyPoint> > allKeypoints;
+    ComputeKeyPointsOctTree(allKeypoints);////得到分布均匀的特征点
     //ComputeKeyPointsOld(allKeypoints);
 
     Mat descriptors;
-
-	//算出实际提取出来的关键点数量nkeypoints
-	//新建descriptors对象，特征点的描述子将存在这里
-	//descriptors就好似nkeypoints*32维的矩阵，矩阵里存着一个uchar，其单位为8bit
-	//这样对于每个关键点，就对应有32*8=256bit的二进制向量作为描述子，相当于每个特征点都对应于128维二进制的pq向量
-	
-    int nkeypoints = 0;
-    for (int level = 0; level < nlevels; ++level)
-        nkeypoints += (int)allKeypoints[level].size();
-    if( nkeypoints == 0 )//表示所有金字塔层图片都没有提取到keypoints
-        _descriptors.release();
-    else
-    {
-		//_OutputArray：：getMat（）之前一定要调用_OutputArray：：create（）为矩阵分配空间
-        _descriptors.create(nkeypoints, 32, CV_8U); //descriptors就好似nkeypoints*32维的矩阵，矩阵里存着一个uchar，其单位为8bit
-													//这样对于每个关键点，就对应有32*8=256bit的二进制向量作为描述子
-        descriptors = _descriptors.getMat(); //转换为Mat数据类型
-    }
-
-    _keypoints.clear();
-    _keypoints.reserve(nkeypoints);//_keypoints预留实际的空间nkeypoints
-
-    int offset = 0;
-	//遍历高斯金字塔每层，计算其提取出的关键点的描述子储存在descriptors里
-    for (int level = 0; level < nlevels; ++level)
-    {
-        vector<KeyPoint>& keypoints = allKeypoints[level];
-        int nkeypointsLevel = (int)keypoints.size();
-
-        if(nkeypointsLevel==0)
-            continue;
-
-        // preprocess the resized image 对图像进行高斯模糊
-        Mat workingMat = mvImagePyramid[level].clone();//完全独立的一个Mat
-
-		/*
-		Mat A = imread(argv[1], CV_LOAD_IMAGE_COLOR);
-		Mat B = A.clone();  // B is a deep copy of A. (has its own copy of the pixels)
-		Mat C = A;          // C is a shallow copy of A ( rows, cols copied, but shared pixel-pointer )
-		Mat D; A.copyTo(D); // D is a deep copy of A, like B
-		*/
-
-        GaussianBlur(workingMat, workingMat, Size(7, 7), 2, 2, BORDER_REFLECT_101);//为了让图片像素连续
-
-        // Compute the descriptors 计算描述子
-		//计算描述子，其计算所需的点对分布采用的是高斯分布，储存在pattern里
-        Mat desc = descriptors.rowRange(offset, offset + nkeypointsLevel);
-        computeDescriptors(workingMat, keypoints, desc, pattern);
-
-        offset += nkeypointsLevel;
-
-        // Scale keypoint coordinates
-		// 对关键点的位置坐做尺度恢复，恢复到原图的位置
-        if (level != 0)
+    if(use_orb){
+        int nkeypoints = 0;
+        for (int level = 0; level < nlevels; ++level)
+            nkeypoints += (int)allKeypoints[level].size();
+        if( nkeypoints == 0 )
+            _descriptors.release();
+        else
         {
-            float scale = mvScaleFactor[level]; //getScale(level, firstLevel, scaleFactor);
-            for (vector<KeyPoint>::iterator keypoint = keypoints.begin(),
-                 keypointEnd = keypoints.end(); keypoint != keypointEnd; ++keypoint)
-                keypoint->pt *= scale;
+            _descriptors.create(nkeypoints, 32, CV_8U);
+            descriptors = _descriptors.getMat();
         }
-        // And add the keypoints to the output
-        _keypoints.insert(_keypoints.end(), keypoints.begin(), keypoints.end());
+
+        _keypoints.clear();
+        _keypoints.reserve(nkeypoints);
+
+        int offset = 0;
+        for (int level = 0; level < nlevels; ++level)
+        {
+            vector<KeyPoint>& keypoints = allKeypoints[level];
+            int nkeypointsLevel = (int)keypoints.size();
+
+            if(nkeypointsLevel==0)
+                continue;
+
+            // preprocess the resized image
+            Mat workingMat = mvImagePyramid[level].clone();
+            GaussianBlur(workingMat, workingMat, Size(7, 7), 2, 2, BORDER_REFLECT_101);
+
+            // Compute the descriptors
+            Mat desc = descriptors.rowRange(offset, offset + nkeypointsLevel);
+            computeDescriptors(workingMat, keypoints, desc, pattern);
+
+            offset += nkeypointsLevel;
+
+            // Scale keypoint coordinates
+            if (level != 0)
+            {
+                float scale = mvScaleFactor[level]; //getScale(level, firstLevel, scaleFactor);
+                for (vector<KeyPoint>::iterator keypoint = keypoints.begin(),
+                    keypointEnd = keypoints.end(); keypoint != keypointEnd; ++keypoint)
+                    keypoint->pt *= scale;
+            }
+            // And add the keypoints to the output
+            _keypoints.insert(_keypoints.end(), keypoints.begin(), keypoints.end());
+        }
+    }else{
+		
+		int nkeypoints = 0;
+        for (int level = 0; level < nlevels; ++level)
+            nkeypoints += (int)allKeypoints[level].size();
+        if( nkeypoints == 0 )
+            _descriptors.release();
+        else
+        {
+			//cout<<"origin keypoints size"<<nkeypoints<<endl;
+            _descriptors.ccreate(nkeypoints, 32, CV_8U);//_descriptor仍然初始化为ORB类型
+            descriptors = _descriptors.getMat();
+			Mat ASD.create(nkeypoints, 256, CV_32FC1);//创建一个ASD类型的描述子
+        }
+        _keypoints.clear();
+        _keypoints.reserve(nkeypoints);
+
+        int offset = 0;
+        for (int level = 0; level < nlevels; ++level)
+        {
+            vector<KeyPoint>& keypoints = allKeypoints[level];
+            int nkeypointsLevel = (int)keypoints.size();
+
+            if(nkeypointsLevel==0)
+                continue;
+
+            // preprocess the resized image
+            Mat workingMat = mvImagePyramid[level].clone();
+            GaussianBlur(workingMat, workingMat, Size(7, 7), 2, 2, BORDER_REFLECT_101);
+
+            // Compute the descriptors
+            Mat desc = ASD.rowRange(offset, offset + nkeypointsLevel);
+            computeSIFTDescriptors(workingMat, keypoints, desc, pattern , &module);
+			computeBASDfromASD(ASD,descriptors)//将256的ASD转换成descriptor
+            offset += nkeypointsLevel;
+
+            // Scale keypoint coordinates
+            if (level != 0)
+            {
+                float scale = mvScaleFactor[level]; //getScale(level, firstLevel, scaleFactor);
+                for (vector<KeyPoint>::iterator keypoint = keypoints.begin(),
+                    keypointEnd = keypoints.end(); keypoint != keypointEnd; ++keypoint)
+                    keypoint->pt *= scale;
+            }
+            // And add the keypoints to the output
+            _keypoints.insert(_keypoints.end(), keypoints.begin(), keypoints.end());
+        }
+
+	
     }
 }
 
-/**
- * 构建图像金字塔（并包含边界EDGE_THRESHOLD）来实现尺度不变性
- * @param image 输入图像
-	建立图像金字塔
-
-	将原始图像一级级缩小并依次存在mvImagePyramid里
-	先用resize()将图片缩放至sz大小，放入 mvImagePyramid[i]；
-	接着用copyMakeBorder()扩展边界至wholeSize大小放入temp；
-	注意temp和mvImagePyramid[i]公用相同数据区，改变temp会改变mvImagePyramid[i]。
-
- */
-
- //********填充区域和裁剪有点冗余,可以简化,直接缩小,temp那步操作可以省略的********//
-//可以直接缩小保存
 void ORBextractor::ComputePyramid(cv::Mat image)
 {
-    for (int level = 0; level < nlevels; ++level)//kitti里面是8level,第0层图像最大
+    for (int level = 0; level < nlevels; ++level)
     {
-        float scale = mvInvScaleFactor[level];//通通小于1，所以每层图片是在缩小
-        // 该层金字塔图像大小
+        float scale = mvInvScaleFactor[level];
         Size sz(cvRound((float)image.cols*scale), cvRound((float)image.rows*scale));
-		//OpenCv中尺寸Size类与点Point类的表示十分类似,最主要的区别是,Size(尺寸)类的数据成员是width和height,而Point类的数据成员是坐标点
-
-        // 包含边界后的图像大小，//截图前的图片尺寸
-        Size wholeSize(sz.width + EDGE_THRESHOLD*2, sz.height + EDGE_THRESHOLD*2);//const int EDGE_THRESHOLD = 19;宽高上下左右各扩充EDGE_THRESHOLD
-        Mat temp(wholeSize, image.type()), masktemp;//新建一个temp，大小为wholeSize，mat.type返回CV_(位数）+（数据类型）+（通道数
-
-		
-
-		//从temp裁剪（起点为EDGE_THRESHOLD, EDGE_THRESHOLD，大小为sz.width, 			
-		//sz.height）存入mvImagePyramid[level]
-        mvImagePyramid[level] = temp(Rect(EDGE_THRESHOLD, EDGE_THRESHOLD, sz.width, sz.height));//cv::Rect rect(x, y, width, height);左上角坐标右x下y，
+        Size wholeSize(sz.width + EDGE_THRESHOLD*2, sz.height + EDGE_THRESHOLD*2);
+        Mat temp(wholeSize, image.type()), masktemp;
+        mvImagePyramid[level] = temp(Rect(EDGE_THRESHOLD, EDGE_THRESHOLD, sz.width, sz.height));
 
         // Compute the resized image
         if( level != 0 )
         {
-            resize(mvImagePyramid[level-1], mvImagePyramid[level], sz, 0, 0, cv::INTER_LINEAR);//由下面一层得到相邻上面一层，缩小图片
-			/*
-			void cv::resize ( InputArray src, OutputArray dst,Size dsize, double fx = 0, double fy = 0, int interpolation = INTER_LINEAR  ) 
-			对输入图像缩放到指定大小，dsize和fx、fy不能同时为0
-			fx=0时，fx=(double)dsize.width/src.cols
-			fy=0时，fy=(double)dsize.height/src.rows
-			一般情况下，如果要缩小图像用cv::INTER_AREA算法实现，而放大图像如果想取得较好的效果则使用cv::INTER_CUBIC，
-			此插值算法效果好但是速度慢，而cv::INTER_LINEAR插值相对较快而且效果也是可以接受。
-			*/
+            resize(mvImagePyramid[level-1], mvImagePyramid[level], sz, 0, 0, INTER_LINEAR);
 
-			//https://blog.csdn.net/guyuealian/article/details/78113325
-			//为了避免剪切超出图像的边界，所以对图像进行填充。指定的颜色来填充，或者复制边界的像素的填充，甚至想镜像某个位置填充超出的边界
             copyMakeBorder(mvImagePyramid[level], temp, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD,
-                           BORDER_REFLECT_101+BORDER_ISOLATED);     
-
-			
-
+                           BORDER_REFLECT_101+BORDER_ISOLATED);            
         }
         else
         {
             copyMakeBorder(image, temp, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD,
-                           BORDER_REFLECT_101);//  BORDER_REFLECT_101   边界对称填充       
+                           BORDER_REFLECT_101);            
         }
     }
 
