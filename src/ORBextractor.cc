@@ -65,7 +65,6 @@
 #include <iostream>
 #include <torch/torch.h>
 #include <torch/script.h> 
-#include <ros/ros.h>
 using namespace cv;
 using namespace std;
 
@@ -152,8 +151,8 @@ static void computeOrbDescriptor(const KeyPoint& kpt,
 
 
 
-//////////////////
-/////////////////
+
+/*
 static void computesiftDescriptor(const KeyPoint& kpt,
                                  const Mat& img, const Point* pattern,
                                  float* desc , torch::jit::script::Module* module)
@@ -171,14 +170,12 @@ static void computesiftDescriptor(const KeyPoint& kpt,
 		std::vector<torch::jit::IValue> inputs;
 		auto img_tensor = torch::from_blob(img_float.data, {1,32, 32, 1}).permute({0, 3, 1, 2});
 		inputs.push_back(img_tensor.to(torch::kCUDA));
-		ros::Time begin = ros::Time::now();
 		at::Tensor output = module->forward(inputs).toTensor();
 		output=output.to(torch::kCPU);
 		memcpy(desc,output.data_ptr(),128 * sizeof(float));
-		ros::Time end1 = ros::Time::now();
 	}
 }
-
+*/
 
 static int bit_pattern_31_[256*4] =
 {
@@ -452,7 +449,9 @@ ORBextractor::ORBextractor(int _nfeatures, float _scaleFactor, int _nlevels,
     nfeatures(_nfeatures), scaleFactor(_scaleFactor), nlevels(_nlevels),
     iniThFAST(_iniThFAST), minThFAST(_minThFAST)
 {
-    module = torch::jit::load("/home/mataiyuan/visual_map/model/mine/bestmodel_c.pt");
+    cout<<"module loading....."<<endl;
+    module = torch::jit::load("/home/gxf/slam/ORB-SlAM2/ASDmodule/ASDNet.pt");
+    cout<<"module loaded"<<endl;
     module.to(at::kCUDA);
     f2d = xfeatures2d::SIFT::create();
     mvScaleFactor.resize(nlevels);
@@ -480,7 +479,7 @@ ORBextractor::ORBextractor(int _nfeatures, float _scaleFactor, int _nlevels,
     float nDesiredFeaturesPerScale = nfeatures*(1 - factor)/(1 - (float)pow((double)factor, (double)nlevels));
 
     int sumFeatures = 0;
-    for( int level = 0; level < nlevels-1; level++ ) /////a1求出来之后，剩下的就是依次乘以公比factor
+    for( int level = 0; level < nlevels-1; level++ ) //a1求出来之后，剩下的就是依次乘以公比factor
     {
         mnFeaturesPerLevel[level] = cvRound(nDesiredFeaturesPerScale);
         sumFeatures += mnFeaturesPerLevel[level];
@@ -869,7 +868,7 @@ void ORBextractor::ComputeKeyPointsOctTree(vector<vector<KeyPoint> >& allKeypoin
                     {
                         (*vit).pt.x+=j*wCell;
                         (*vit).pt.y+=i*hCell;
-                        vToDistributeKeys.push_back(*vit);/////这里存入的只是对应于该层的特征点的位置
+                        vToDistributeKeys.push_back(*vit);//这里存入的只是对应于该层的特征点的位置
                     }
                 }
 
@@ -1098,7 +1097,6 @@ static void computeSIFTDescriptors(const Mat& image, vector<KeyPoint>& keypoints
                                const vector<Point>& pattern , torch::jit::script::Module *module)
 {
 
-	ros::Time begin = ros::Time::now();
 	cv::Mat img_float ;
 	int turn = 1;
 	int width = image.cols;
@@ -1110,7 +1108,7 @@ static void computeSIFTDescriptors(const Mat& image, vector<KeyPoint>& keypoints
 			int y = cvRound(keypoints[i].pt.y);
 			if( x-16 > 0 && x + 16 <width && y - 16>0 && y+16 <height )
 			{
-				Mat patch = image(Rect(x-16,y - 16 ,32,32)); //// x  ,  y  ,  width  ,  height
+				Mat patch = image(Rect(x-16,y - 16 ,32,32)); // x  ,  y  ,  width  ,  height
 				if(turn==1){ img_float = patch ; }//还不能用vconcat
 				else
 				{
@@ -1130,42 +1128,52 @@ static void computeSIFTDescriptors(const Mat& image, vector<KeyPoint>& keypoints
 	at::Tensor output = module->forward(inputs).toTensor();
 	output=output.to(torch::kCPU);
 	memcpy(descriptors.data,output.data_ptr(),(turn) *256 * sizeof(float));//将outpuu中的数字复制给descriptors
-
-	
-
 }
 
-inline int bainaryDesc(float x) return (x > 0.0) ? 1 : 0;
-	
+inline int bainaryDesc(float x) {return (x > 0.0) ? 1 : 0;}
+
+//ASD row= 4002  col= 256
+//BASD row= 4002  col= 32
 static void computeBASDfromASD(const Mat &ASD, Mat& BASD)//将256的ASD转换成ASD
 {
-	for (size_t i = 0; i < ASD.size(); i++)
+	for ( int i = 0; i < ASD.rows; i++)
 	{
 		cv::Mat taf;
 		vector<float> desA_;
-		ASD[i].convertTo(taf, CV_64F);
-		desA_ = (vector<float>)taf.reshape(1, 1);
-		for (int j = 0, k = 0; j < 256; j += 8, ++k)
+		ASD.rowRange(i,i+1).convertTo(taf, CV_32FC1);// 取出特定行，包括左边界，但不包括右边界
+        //cout<<"taf row= "<<taf.rows<<"  col="<<taf.cols<<endl;//1 256
+        //cout<<"calculate 1"<<endl;
+		desA_ = (vector<float>)taf.reshape(1, 1);//Mat::reshape(int cn, int rows=0) const， cn表示通道数，为0则表示不变。rows表示后面得到的行数
+        //cout<<"calculate 2"<<endl;
+        
+        //cv::Mat desA_;
+        //desA_=ASD.rowRange(i,i);
+		for (int j = 0, k = 0; j < 256&&k<32; j += 8, ++k)
 		{
 			int val, t;
-			t = bainaryDesc(desA_[j]);
+			t = bainaryDesc(desA_[j + 0]);
 			val = t;
 
 			t = bainaryDesc(desA_[j + 1]);
-			val |= (t) << 1;
+			val |= t << 1;
 			t = bainaryDesc(desA_[j + 2]);
-			val |= (t) << 2;
+			val |= t << 2;
 			t = bainaryDesc(desA_[j + 3]);
-			val |= (t) << 3;
+			val |= t << 3;
 			t = bainaryDesc(desA_[j + 4]);
-			val |= (t) << 4;
+			val |= t << 4;
 			t = bainaryDesc(desA_[j + 5]);
-			val |= (t) << 5;
+			val |= t << 5;
 			t = bainaryDesc(desA_[j + 6]);
-			val |= (t) << 6;
+			val |= t << 6;
 			t = bainaryDesc(desA_[j + 7]);
-			val |= (t) << 7;
-			BASD.ptr((int)i)[k] = (uchar)val;
+			val |= t << 7;
+			BASD.ptr(i)[k] = (uchar)val;
+            if(i%2000==0)
+            {
+                cout<<"  "<<int(BASD.ptr(i)[k] ) ;
+            }
+                
 		}
 	}
 }
@@ -1180,10 +1188,10 @@ void ORBextractor::ExtractDesc( InputArray _image, InputArray _mask, vector<KeyP
     assert(image.type() == CV_8UC1 );
 
     // Pre-compute the scale pyramid
-    ComputePyramid(image);///////计算图像金字塔
+    ComputePyramid(image);//计算图像金字塔
 
     vector < vector<KeyPoint> > allKeypoints;
-    ComputeKeyPointsOctTree(allKeypoints);////得到分布均匀的特征点
+    ComputeKeyPointsOctTree(allKeypoints);//得到分布均匀的特征点
     //ComputeKeyPointsOld(allKeypoints);
 
     Mat descriptors;
@@ -1232,19 +1240,22 @@ void ORBextractor::ExtractDesc( InputArray _image, InputArray _mask, vector<KeyP
             // And add the keypoints to the output
             _keypoints.insert(_keypoints.end(), keypoints.begin(), keypoints.end());
         }
-    }else{
-		
+    }
+    else
+    {
 		int nkeypoints = 0;
+        Mat ASD;
         for (int level = 0; level < nlevels; ++level)
             nkeypoints += (int)allKeypoints[level].size();
         if( nkeypoints == 0 )
             _descriptors.release();
         else
         {
-			//cout<<"origin keypoints size"<<nkeypoints<<endl;
-            _descriptors.ccreate(nkeypoints, 32, CV_8U);//_descriptor仍然初始化为ORB类型
+			cout<<"keypoints size= "<<nkeypoints<<"  ";
+            _descriptors.create(nkeypoints, 32, CV_8U);//_descriptor仍然初始化为ORB类型
             descriptors = _descriptors.getMat();
-			Mat ASD.create(nkeypoints, 256, CV_32FC1);//创建一个ASD类型的描述子
+			
+            ASD.create(nkeypoints, 256, CV_32FC1);//创建一个ASD类型的描述子
         }
         _keypoints.clear();
         _keypoints.reserve(nkeypoints);
@@ -1263,9 +1274,15 @@ void ORBextractor::ExtractDesc( InputArray _image, InputArray _mask, vector<KeyP
             GaussianBlur(workingMat, workingMat, Size(7, 7), 2, 2, BORDER_REFLECT_101);
 
             // Compute the descriptors
-            Mat desc = ASD.rowRange(offset, offset + nkeypointsLevel);
-            computeSIFTDescriptors(workingMat, keypoints, desc, pattern , &module);
-			computeBASDfromASD(ASD,descriptors)//将256的ASD转换成descriptor
+            //Mat desc = ASD;
+            //cout<<"computing desc......"<<endl;
+            //cout<<"desc before row= "<<desc.rows<< "  col= "<<desc.cols<<endl;
+            computeSIFTDescriptors(workingMat, keypoints, ASD, pattern , &module);
+            //cout<<"computing desc.  end"<<endl;
+            //cout<<"desc after row= "<<desc.rows<< "  col= "<<desc.cols<<endl;
+            //cout<<"ASD row= "<<ASD.rows<< "  col= "<<ASD.cols<<endl;
+            //cout<<"descriptors row= "<<descriptors.rows<< "  col= "<<descriptors.cols<<endl;
+			computeBASDfromASD(ASD,descriptors);//将256的ASD转换成descriptor
             offset += nkeypointsLevel;
 
             // Scale keypoint coordinates

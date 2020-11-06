@@ -1,5 +1,8 @@
 {
     "files.associations": {
-        "thread": "cpp"
+        "*.txt": "csharp",
+        "thread": "cpp",
+        "ostream": "cpp",
+        "iostream": "cpp"
     }
 }

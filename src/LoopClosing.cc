@@ -74,7 +74,7 @@ void LoopClosing::Run()
                if(ComputeSim3())
                {
                    // Perform loop fusion and pose graph optimization
-                   CorrectLoop();
+                   CorrectLoop();//这里先将回环检测关掉
                }
             }
         }

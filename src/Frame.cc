@@ -266,6 +266,7 @@ void Frame::AssignFeaturesToGrid()
 }
 
 
+/*
 void Frame::ExtractORB(int flag, const cv::Mat &im)
 {
 	//提取结果被保存在Frame类的成员变量std::vector<cv:KeyPoint> mvKeys和cv:Mat mDescriptors中
@@ -273,6 +274,17 @@ void Frame::ExtractORB(int flag, const cv::Mat &im)
         (*mpORBextractorLeft)(im,cv::Mat(),mvKeys,mDescriptors);//ORBextractor重载了(), ORBextractor.h 59
     else
         (*mpORBextractorRight)(im,cv::Mat(),mvKeysRight,mDescriptorsRight);
+}
+*/
+
+void Frame::ExtractORB(int flag, const cv::Mat &im)
+{
+	//提取结果被保存在Frame类的成员变量std::vector<cv:KeyPoint> mvKeys和cv:Mat mDescriptors中
+    bool use_orb=true;
+    if(flag==0)
+        mpORBextractorLeft->ExtractDesc(im,cv::Mat(),mvKeys,mDescriptors,use_orb);//ORBextractor重载了(), ORBextractor.h 59
+    else
+        mpORBextractorRight->ExtractDesc(im,cv::Mat(),mvKeysRight,mDescriptorsRight,use_orb);
 }
 
 /**
