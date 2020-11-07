@@ -68,7 +68,7 @@ int main(int argc, char **argv)
         im = cv::imread(vstrImageFilenames[ni],CV_LOAD_IMAGE_UNCHANGED);
         double tframe = vTimestamps[ni];
 	cout<<"第 "<<ni <<"张图片"<<endl;
-	if(ni>=2000){break;}
+	/*if(ni>=2000){break;}*/
         if(im.empty())
         {
             cerr << endl << "Failed to load image at: " << vstrImageFilenames[ni] << endl;
@@ -93,7 +93,7 @@ int main(int argc, char **argv)
         double ttrack= std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
 
         vTimesTrack[ni]=ttrack;
-
+        /*
         // Wait to load the next frame，使图片的加载和实际拍摄的时间一样
         double T=0;
         if(ni<nImages-1)
@@ -102,7 +102,8 @@ int main(int argc, char **argv)
             T = tframe-vTimestamps[ni-1];
 
         if(ttrack<T)
-            usleep((T-ttrack)*1e6);
+            usleep((T-ttrack)*1e6);*/
+        //usleep(30*1e3);
     }
 
     // Stop all threads
@@ -121,6 +122,7 @@ int main(int argc, char **argv)
 
     // Save camera trajectory
     SLAM.SaveKeyFrameTrajectoryTUM("KeyFrameTrajectory.txt");    
+    usleep(10*1e3);//为了保存数据
 
     return 0;
 }

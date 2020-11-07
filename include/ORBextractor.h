@@ -103,7 +103,7 @@ protected:
     int nlevels;
     int iniThFAST;
     int minThFAST;
-    cv::Ptr<cv::Feature2D> f2d;////
+    cv::Ptr<cv::Feature2D> f2d;
     std::vector<int> mnFeaturesPerLevel;
 
     std::vector<int> umax;
