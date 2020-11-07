@@ -280,7 +280,7 @@ void Frame::ExtractORB(int flag, const cv::Mat &im)
 void Frame::ExtractORB(int flag, const cv::Mat &im)
 {
 	//提取结果被保存在Frame类的成员变量std::vector<cv:KeyPoint> mvKeys和cv:Mat mDescriptors中
-    bool use_orb=true;
+    bool use_orb=false;
     if(flag==0)
         mpORBextractorLeft->ExtractDesc(im,cv::Mat(),mvKeys,mDescriptors,use_orb);//ORBextractor重载了(), ORBextractor.h 59
     else

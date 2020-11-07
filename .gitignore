@@ -21,8 +21,8 @@ Vocabulary/
 build/
 *~
 lib/
-/ASDmodule/
-/.vscode/
-/.vs/
+ASDmodule/
+.vscode/
+.vs/
 *.txt~
 *.cpp~
