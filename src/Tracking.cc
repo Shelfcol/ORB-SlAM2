@@ -734,6 +734,7 @@ void Tracking::MonocularInitialization()
         // 单目初始帧提取的特征点数必须大于100，否则放弃该帧图像，重新抓取图片进行初始化
         if(mCurrentFrame.mvKeys.size()>100)//mCurrentFrame是输入图片构造的Frame
         {
+			cout << " start initializing, keypoints.number>100" << endl;
             // 步骤1：得到用于初始化的第一帧，初始化需要两帧
             mInitialFrame = Frame(mCurrentFrame);
             // 记录最近的一帧
@@ -763,6 +764,7 @@ void Tracking::MonocularInitialization()
         // 因此只有连续两帧的特征点个数都大于100时，才能继续进行初始化过程
         if((int)mCurrentFrame.mvKeys.size()<=100)
         {
+			cout << " keypoints is less , reinitializing..." << endl;
             delete mpInitializer;//单目用相邻两帧进行进行初始化，如果这一帧的关键点数量太少，则上一帧图像也不应该使用，则删除这个指针，并附为NULL，防止成为野指针
             mpInitializer = static_cast<Initializer*>(NULL);//防止成为野指针
 															

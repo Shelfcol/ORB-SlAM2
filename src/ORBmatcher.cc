@@ -496,6 +496,7 @@ int ORBmatcher::SearchForInitialization(Frame &F1, Frame &F2, vector<cv::Point2f
     vector<int> vMatchedDistance(F2.mvKeysUn.size(),INT_MAX);//初始化成长度为F2.mvKeysUn.size()，数值为INT_MAX的vector
     vector<int> vnMatches21(F2.mvKeysUn.size(),-1);
 
+	//遍历F1的去除畸变的关键点的描述子，然后在关键点的一个100的窗内遍历F2对应的关键点，依次计算描述子的距离，找出距离最短的和第二短的
     for(size_t i1=0, iend1=F1.mvKeysUn.size(); i1<iend1; i1++)//遍历当前关键点
     {
         cv::KeyPoint kp1 = F1.mvKeysUn[i1];
@@ -522,7 +523,7 @@ int ORBmatcher::SearchForInitialization(Frame &F1, Frame &F2, vector<cv::Point2f
 
             cv::Mat d2 = F2.mDescriptors.row(i2);//遍历vIndices的描述子
 
-            int dist = DescriptorDistance(d1,d2);//计算描述子之间的距离
+            int dist = DescriptorDistance(d1,d2);//计算描述子之间的距离,利用二进制
 
             if(vMatchedDistance[i2]<=dist)//这对的距离比记录的大，则不符合条件，舍弃
                 continue;

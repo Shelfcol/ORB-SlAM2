@@ -1197,8 +1197,9 @@ void ORBextractor::ExtractDesc( InputArray _image, InputArray _mask, vector<KeyP
     Mat descriptors;
     if(use_orb){
         int nkeypoints = 0;
-        for (int level = 0; level < nlevels; ++level)
+        for (int level = 0; level < nlevels; ++level)//将每层的关键点的数量统计出来
             nkeypoints += (int)allKeypoints[level].size();
+
         if( nkeypoints == 0 )
             _descriptors.release();
         else
@@ -1210,22 +1211,22 @@ void ORBextractor::ExtractDesc( InputArray _image, InputArray _mask, vector<KeyP
         _keypoints.clear();
         _keypoints.reserve(nkeypoints);
 
-        int offset = 0;
+        int offset = 0;//记录的是当前level对应的descriptors的开始行号
         for (int level = 0; level < nlevels; ++level)
         {
-            vector<KeyPoint>& keypoints = allKeypoints[level];
-            int nkeypointsLevel = (int)keypoints.size();
+            vector<KeyPoint>& keypoints = allKeypoints[level];//当前level的关键点
+            int nkeypointsLevel = (int)keypoints.size();//当前level的关键点数量
 
             if(nkeypointsLevel==0)
                 continue;
 
             // preprocess the resized image
-            Mat workingMat = mvImagePyramid[level].clone();
+            Mat workingMat = mvImagePyramid[level].clone();//取出这一level的图
             GaussianBlur(workingMat, workingMat, Size(7, 7), 2, 2, BORDER_REFLECT_101);
 
             // Compute the descriptors
-            Mat desc = descriptors.rowRange(offset, offset + nkeypointsLevel);
-            computeDescriptors(workingMat, keypoints, desc, pattern);
+            Mat desc = descriptors.rowRange(offset, offset + nkeypointsLevel);//desc是当前level的图片的描述子在descriptors的行号范围
+            computeDescriptors(workingMat, keypoints, desc, pattern);//计算当前level的描述子
 
             offset += nkeypointsLevel;
 
@@ -1277,12 +1278,13 @@ void ORBextractor::ExtractDesc( InputArray _image, InputArray _mask, vector<KeyP
             //Mat desc = ASD;
             //cout<<"computing desc......"<<endl;
             //cout<<"desc before row= "<<desc.rows<< "  col= "<<desc.cols<<endl;
-            computeSIFTDescriptors(workingMat, keypoints, ASD, pattern , &module);
+			Mat ASD_in_now_level= ASD.rowRange(offset, offset + nkeypointsLevel);
+            computeSIFTDescriptors(workingMat, keypoints, ASD_in_now_level, pattern , &module);
             //cout<<"computing desc.  end"<<endl;
             //cout<<"desc after row= "<<desc.rows<< "  col= "<<desc.cols<<endl;
             //cout<<"ASD row= "<<ASD.rows<< "  col= "<<ASD.cols<<endl;
             //cout<<"descriptors row= "<<descriptors.rows<< "  col= "<<descriptors.cols<<endl;
-			computeBASDfromASD(ASD,descriptors);//将256的ASD转换成descriptor
+			
             offset += nkeypointsLevel;
 
             // Scale keypoint coordinates
@@ -1296,8 +1298,7 @@ void ORBextractor::ExtractDesc( InputArray _image, InputArray _mask, vector<KeyP
             // And add the keypoints to the output
             _keypoints.insert(_keypoints.end(), keypoints.begin(), keypoints.end());
         }
-
-	
+		computeBASDfromASD(ASD, descriptors);//将256的ASD转换成descriptor
     }
 }
 

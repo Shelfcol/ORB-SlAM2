@@ -81,7 +81,7 @@ int main(int argc, char **argv)
         std::chrono::monotonic_clock::time_point t1 = std::chrono::monotonic_clock::now();
 #endif
 
-        // Pass the image to the SLAM system
+        // Pass the image to the SLAM system，每张图片都循环执行这个Track线程
         SLAM.TrackMonocular(im,tframe);
 
 #ifdef COMPILEDWITHC11
