@@ -5,6 +5,6 @@
     "\\Examples\\Monocular",
     "\\src"
   ],
-  "SelectedNode": "\\src\\ORBmatcher.cc",
+  "SelectedNode": "\\Examples\\Monocular\\mono_kitti.cc",
   "PreviewInSolutionExplorer": false
 }
