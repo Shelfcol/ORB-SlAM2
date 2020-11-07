@@ -3,9 +3,8 @@
     "",
     "\\Examples",
     "\\Examples\\Monocular",
-    "\\include",
     "\\src"
   ],
-  "SelectedNode": "\\src\\Tracking.cc",
+  "SelectedNode": "\\src\\ORBmatcher.cc",
   "PreviewInSolutionExplorer": false
 }
