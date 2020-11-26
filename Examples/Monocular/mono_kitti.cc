@@ -122,7 +122,7 @@ int main(int argc, char **argv)
 
     // Save camera trajectory
     SLAM.SaveKeyFrameTrajectoryTUM("KeyFrameTrajectory.txt");    
-    usleep(10*1e3);//为了保存数据
+    usleep(20000*1e3);//为了保存数据
 
     return 0;
 }

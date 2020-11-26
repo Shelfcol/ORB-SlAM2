@@ -73,14 +73,16 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
 	  bVocLoad = mpVocabulary->loadFromTextFile(strVocFile);//加载VocFile
 	else if(has_suffix(strVocFile, ".bin"))
 	  bVocLoad = mpVocabulary->loadFromBinaryFile(strVocFile);
+    else if(has_suffix(strVocFile, ".gz"))
+          mpVocabulary->load(strVocFile);
 	else
 	  bVocLoad = false;
-    if(!bVocLoad)
+    /*if(!bVocLoad)
     {
         cerr << "Wrong path to vocabulary. " << endl;
         cerr << "Failed to open at: " << strVocFile << endl;
         exit(-1);
-    }
+    }*/
     cout << "Vocabulary loaded!" << endl << endl;
 
     //Create KeyFrame Database，里面有关键帧的add erase clear
