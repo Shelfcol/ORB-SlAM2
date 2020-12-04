@@ -43,7 +43,7 @@ int main(int argc, char **argv)
     }
 
     // Retrieve paths to images
-    vector<string> vstrImageFilenames;//利用LoadImage函数将所有的图片和时间戳加载到两个vector里面
+    vector<string> vstrImageFilenames;
     vector<double> vTimestamps;
     LoadImages(string(argv[3]), vstrImageFilenames, vTimestamps);
 
@@ -67,8 +67,7 @@ int main(int argc, char **argv)
         // Read image from file
         im = cv::imread(vstrImageFilenames[ni],CV_LOAD_IMAGE_UNCHANGED);
         double tframe = vTimestamps[ni];
-	cout<<"第 "<<ni <<"张图片"<<endl;
-	/*if(ni>=2000){break;}*/
+
         if(im.empty())
         {
             cerr << endl << "Failed to load image at: " << vstrImageFilenames[ni] << endl;
@@ -81,7 +80,7 @@ int main(int argc, char **argv)
         std::chrono::monotonic_clock::time_point t1 = std::chrono::monotonic_clock::now();
 #endif
 
-        // Pass the image to the SLAM system，每张图片都循环执行这个Track线程
+        // Pass the image to the SLAM system
         SLAM.TrackMonocular(im,tframe);
 
 #ifdef COMPILEDWITHC11
@@ -93,17 +92,17 @@ int main(int argc, char **argv)
         double ttrack= std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
 
         vTimesTrack[ni]=ttrack;
-        /*
-        // Wait to load the next frame，使图片的加载和实际拍摄的时间一样
+        cout<<"track time = "<<ttrack*1000<<"  ms"<<endl;
+        
+        // Wait to load the next frame
         double T=0;
         if(ni<nImages-1)
             T = vTimestamps[ni+1]-tframe;
         else if(ni>0)
             T = tframe-vTimestamps[ni-1];
-
+  
         if(ttrack<T)
-            usleep((T-ttrack)*1e6);*/
-        //usleep(30*1e3);
+            usleep((T-ttrack)*1e6);
     }
 
     // Stop all threads
@@ -121,40 +120,42 @@ int main(int argc, char **argv)
     cout << "mean tracking time: " << totaltime/nImages << endl;
 
     // Save camera trajectory
-    SLAM.SaveKeyFrameTrajectoryTUM("stamped_traj_estimate.txt");    
-    usleep(20000*1e3);//为了保存数据
+    SLAM.SaveKeyFrameTrajectoryTUM("KeyFrameTrajectory.txt");    
 
     return 0;
 }
 
+//文件夹下面有/pose_left.txt，/image_left/000000_left.png
+
 void LoadImages(const string &strPathToSequence, vector<string> &vstrImageFilenames, vector<double> &vTimestamps)
 {
     ifstream fTimes;
-    string strPathTimeFile = strPathToSequence + "/times.txt";
+    string strPathTimeFile = strPathToSequence + "/pose_left.txt";
     fTimes.open(strPathTimeFile.c_str());
+    int nTimes=0;
+    float timeStamp=0.0;
+    float time_duration=0.1;
     while(!fTimes.eof())
     {
         string s;
         getline(fTimes,s);
         if(!s.empty())
         {
-            stringstream ss;
-            ss << s;
-            double t;
-            ss >> t;
-            vTimestamps.push_back(t);
+            ++nTimes;
+            vTimestamps.push_back(timeStamp);
+            timeStamp+=time_duration;
         }
     }
+    cout<<"picture size= "<<nTimes<<endl;
 
-    string strPrefixLeft = strPathToSequence + "/image_0/";
+    string strPrefixLeft = strPathToSequence + "/image_left/";
 
-    const int nTimes = vTimestamps.size();
     vstrImageFilenames.resize(nTimes);
 
     for(int i=0; i<nTimes; i++)
     {
         stringstream ss;
         ss << setfill('0') << setw(6) << i;
-        vstrImageFilenames[i] = strPrefixLeft + ss.str() + ".png";
+        vstrImageFilenames[i] = strPrefixLeft + ss.str()+"_left" + ".png";
     }
 }

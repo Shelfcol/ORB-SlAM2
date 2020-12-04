@@ -112,7 +112,12 @@ target_link_libraries(mono_tum ${PROJECT_NAME})
 add_executable(mono_kitti
 Examples/Monocular/mono_kitti.cc)
 target_link_libraries(mono_kitti ${PROJECT_NAME})
-set_property(TARGET mono_kitti PROPERTY CXX_STANDARD 11)
+#set_property(TARGET mono_kitti PROPERTY CXX_STANDARD 11)
+
+add_executable(mono_tartanair
+Examples/Monocular/mono_tartanair.cc)
+target_link_libraries(mono_tartanair ${PROJECT_NAME})
+#set_property(TARGET mono_tartanair PROPERTY CXX_STANDARD 11)
 
 add_executable(mono_euroc
 Examples/Monocular/mono_euroc.cc)

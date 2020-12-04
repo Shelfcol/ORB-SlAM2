@@ -1,0 +1,1 @@
+./Examples/Monocular/mono_tartanair Vocabulary/vocab_larger.yml.gz Examples/Monocular/tartanair.yaml /media/gxf/Elements/opensource_dataset/tartanair/easy_hard_left_camera/SoulCity/soulcity/soulcity/Hard/P001
